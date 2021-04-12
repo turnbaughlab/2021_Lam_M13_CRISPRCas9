@@ -4,10 +4,10 @@ The following code is provided for analyses performed in Lam et al., 2021.
 
 ## Flow cytometry
 
-- [R Notebook](https://htmlpreview.github.io/?): Flow cytometry analysis for in vitro: sfgfp vs. mcherry E. coli with GFPT-M13 at 8h
-- [R Notebook](https://htmlpreview.github.io/?): Flow cytometry analysis for in vitro: GFP vs. mCherry E. coli with GFPT M13 at 8h vs. 24h
-- [R Notebook](https://htmlpreview.github.io/?): Flow cytometry analysis for mouse exp17: GFP vs. mCherry E. coli competition with GFPT M13
-- [R Notebook](https://htmlpreview.github.io/?) : Flow cytometry analysis for mouse exp19: double-marked E. coli with GFPT M13
+- [R Notebook](https://htmlpreview.github.io/?): Flow cytometry for in vitro: E. coli sfgfp vs E. coli mcherry with GFPT-M13 at 8h
+- [R Notebook](https://htmlpreview.github.io/?): Flow cytometry for in vitro: E. coli sfgfp vs E. coli mcherry with GFPT-M13 at 8h vs 24h
+- [R Notebook](https://htmlpreview.github.io/?): Flow cytometry for mouse exp17: E. coli sfgfp vs E. coli mcherry competition with GFPT-M13
+- [R Notebook](https://htmlpreview.github.io/?): Flow cytometry for mouse exp19: E. coli sfgfp mcherry with GFPT-M13
 
 
 ## 16S rRNA gene sequencing
@@ -17,5 +17,5 @@ The following code is provided for analyses performed in Lam et al., 2021.
 
 ## Read alignment 
 
-- [bash script](https://htmlpreview.github.io/?): in vitro 
-- [bash script](https://htmlpreview.github.io/?): in vivo 
+- [bash script](https://htmlpreview.github.io/?): Reads processing for in vitro: E. coli sfgfp after GFPT-M13 
+- [bash script](https://htmlpreview.github.io/?): Reads processing for exp19: E. coli sfgfp mcherry after GFPT-M13 
