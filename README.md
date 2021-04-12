@@ -16,7 +16,7 @@ genomic deletions in the gut microbiota
 - [R Notebook](https://htmlpreview.github.io/?): 16S rRNA gene sequencing analysis for mouse exp11: streptomycin treatment
 
 
-## Read alignment 
+## Read alignment for genomic deletions
 
 - [bash script](https://htmlpreview.github.io/?): Reads processing for in vitro: E. coli sfgfp after GFPT-M13 
 - [bash script](https://htmlpreview.github.io/?): Reads processing for exp19: E. coli sfgfp mcherry after GFPT-M13 
