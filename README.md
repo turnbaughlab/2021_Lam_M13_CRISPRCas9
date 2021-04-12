@@ -1,6 +1,7 @@
 # 2021_Lam_M13_CRISPRCas9
 
-The following code is provided for analyses performed in Lam et al., 2021.
+The following code is provided for analyses performed in Lam et al., 2021. Phage-delivered CRISPR-Cas9 for strain-specific depletion and
+genomic deletions in the gut microbiota
 
 ## Flow cytometry
 
