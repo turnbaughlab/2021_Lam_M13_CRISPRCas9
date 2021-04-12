@@ -1,6 +1,6 @@
 # 2021_Lam_M13_CRISPRCas9
 
-**Author: Kathy N Lam**\
+**Author: Kathy N. Lam**\
 **Updated: April 12, 2021**
 
 The following code and scripts are provided for analyses performed in Lam *et al.*, 2021. Phage-delivered CRISPR-Cas9 for strain-specific depletion and
