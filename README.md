@@ -12,7 +12,7 @@ Flow cytometry data were analyzed using R.
 
 - [](https://htmlpreview.github.io/?): Flow cytometry for in vitro: *E. coli sfgfp* vs *E. coli mcherry* with GFPT-M13 at 8h
 - [](https://htmlpreview.github.io/?): Flow cytometry for in vitro: *E. coli sfgfp* vs *E. coli mcherry* with GFPT-M13 at 8h vs 24h
-- [R Notebook](https://htmlpreview.github.io/?): Flow cytometry for mouse exp17: *E. coli sfgfp* vs *E. coli mcherry* with GFPT-M13
+- [R Notebook](https://htmlpreview.github.io/?2020-01-13_flow_exp17.html): Flow cytometry for mouse exp17: *E. coli sfgfp* vs *E. coli mcherry* with GFPT-M13
 - [](https://htmlpreview.github.io/?): Flow cytometry for mouse exp19: E. coli *sfgfp mcherry* with GFPT-M13
 
 
