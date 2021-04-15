@@ -18,14 +18,14 @@ Flow cytometry data were analyzed using R.
 
 ## 16S rRNA gene sequencing
 
-Sequencing reads were processed in a QIIME2 pipeline as described and analyzed in R.
+Sequencing reads derived from mouse stool samples were processed in a QIIME2 pipeline as described and analyzed in R.
 
 - [[R notebook]](https://htmlpreview.github.io/?) 16S rRNA gene sequencing analysis for mouse exp11: streptomycin treatment
 
 
 ## Genomic deletions
 
-Sequencing reads were processed and compared to reference genomes.
+Sequencing reads derived from in vitro/in vivo isolates were processed and compared to reference genomes.
 
 - [[bash script]]() Read depth using bowtie2 and samtools 
 - [[bash script]]() Deletion prediction using breseq   
