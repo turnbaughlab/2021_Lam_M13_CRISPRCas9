@@ -34,6 +34,6 @@ Sequencing reads were processed and compared to reference genomes.
 
 Complete reference genomes were generated using Nanopore/Illumina hybrid assembly as described.
 
-- [[fasta]]() *E. coli* W1655 F+ (ATCC 23590 / KL68)
-- [[fasta]]() *E. coli* W1655 F+ *sfgfp* (KL114)
-- [[fasta]]() *E. coli* W1655 F+ *sfgfp mcherry* (KL204)
+- [[fasta file]]() *E. coli* W1655 F+ (ATCC 23590 / KL68)
+- [[fasta file]]() *E. coli* W1655 F+ *sfgfp* (KL114)
+- [[fasta file]]() *E. coli* W1655 F+ *sfgfp mcherry* (KL204)
