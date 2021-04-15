@@ -18,7 +18,7 @@ Flow cytometry data, from in vitro bacterial cultures or from mouse stool resusp
 
 ## 16S rRNA gene sequencing
 
-Stool samples were processed using primary qPCR/secondary PCR as described, and sequencing reads were processed in a QIIME2 pipeline and analyzed in R.
+Samples were processed using primary qPCR/secondary PCR, sequencing reads were processed in a QIIME2 pipeline and analyzed in R.
 
 - [[R notebook]](https://htmlpreview.github.io/?) 16S rRNA gene sequencing for mouse exp11: streptomycin treatment
 
@@ -33,7 +33,7 @@ Sequencing reads derived from in vitro and in vivo isolates were processed and c
 
 ## Reference genome assemblies
 
-Complete reference genomes were generated using Nanopore/Illumina hybrid assembly as described.
+Complete reference genomes were generated using Nanopore/Illumina hybrid assembly.
 
 - [[fasta file]]() *E. coli* W1655 F+ (ATCC 23590 / KL68)
 - [[fasta file]]() *E. coli* W1655 F+ *sfgfp* (KL114)
