@@ -43,10 +43,10 @@ Complete reference genomes were generated using Nanopore/Illumina hybrid assembl
 
 M13-compatible CRISPR-Cas9 phagemid vectors were constructed for GFPT-targeting or Non-targeting control.
 
-- [[Genbank file]]()  pCas9-GFPT-f1A (pKL100)
-- [[Genbank file]]()  pCas9-GFPT-f1B (pKL101)
-- [[Genbank file]]()  pCas9-NT-f1A (pKL102)
-- [[Genbank file]]()  pCas9-NT-f1B (pKL103)
+- [[Genbank file]]() pCas9-GFPT-f1A (pKL100)
+- [[Genbank file]]() pCas9-GFPT-f1B (pKL101)
+- [[Genbank file]]() pCas9-NT-f1A (pKL102)
+- [[Genbank file]]() pCas9-NT-f1B (pKL103)
 
 
 
