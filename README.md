@@ -8,7 +8,7 @@ genomic deletions in the gut microbiota. [[bioRxiv version]](https://www.biorxiv
 
 ## Flow cytometry
 
-Flow cytometry data were analyzed using R.
+Flow cytometry data, from in vitro bacterial cultures or from mouse stool resuspensions, were analyzed using R.
 
 - [[R notebook]](https://htmlpreview.github.io/?) Flow cytometry for in vitro: *E. coli sfgfp* vs *E. coli mcherry* with GFPT-M13 at 8h
 - [[R notebook]](https://htmlpreview.github.io/?) Flow cytometry for in vitro: *E. coli sfgfp* vs *E. coli mcherry* with GFPT-M13 at 8h vs 24h
@@ -25,7 +25,7 @@ Sequencing reads derived from mouse stool samples were processed in a QIIME2 pip
 
 ## Genomic deletions
 
-Sequencing reads derived from in vitro/in vivo isolates were processed and compared to reference genomes.
+Sequencing reads derived from in vitro and in vivo isolates were processed and compared to reference genomes.
 
 - [[bash script]]() Read depth using bowtie2 and samtools 
 - [[bash script]]() Deletion prediction using breseq   
