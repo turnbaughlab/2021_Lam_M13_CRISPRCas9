@@ -18,9 +18,9 @@ Flow cytometry data, from in vitro bacterial cultures or from mouse stool resusp
 
 ## 16S rRNA gene sequencing
 
-Sequencing reads derived from mouse stool samples were processed in a QIIME2 pipeline as described and analyzed in R.
+Stool samples were processed using primary qPCR/secondary PCR as described, and sequencing reads were processed in a QIIME2 pipeline and analyzed in R.
 
-- [[R notebook]](https://htmlpreview.github.io/?) 16S rRNA gene sequencing analysis for mouse exp11: streptomycin treatment
+- [[R notebook]](https://htmlpreview.github.io/?) 16S rRNA gene sequencing for mouse exp11: streptomycin treatment
 
 
 ## Genomic deletions
@@ -29,6 +29,7 @@ Sequencing reads derived from in vitro and in vivo isolates were processed and c
 
 - [[bash script]]() Read depth using bowtie2 and samtools 
 - [[bash script]]() Deletion prediction using breseq   
+
 
 ## Reference genome assemblies
 
