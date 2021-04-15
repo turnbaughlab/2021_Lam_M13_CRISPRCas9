@@ -21,7 +21,7 @@ Flow cytometry data, from in vitro bacterial cultures or from mouse stool resusp
 Samples were processed using primary qPCR/secondary PCR, sequencing reads were processed in a QIIME2 pipeline and analyzed in R.
 
 - [[R notebook]](https://htmlpreview.github.io/?) 16S rRNA gene sequencing analysis for mouse exp11: streptomycin treatment
-- [[R notebook]](https://htmlpreview.github.io/?) Bacterial load estimattion for mouse exp11: streptomycin treatment
+- [[R notebook]](https://htmlpreview.github.io/?) Bacterial load estimation for mouse exp11: streptomycin treatment
 
 ## Genomic deletions
 
