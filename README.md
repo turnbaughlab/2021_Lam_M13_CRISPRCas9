@@ -28,4 +28,4 @@ Sequencing reads were processed in a QIIME2 pipeline as described and analyzed i
 Sequencing reads were processed and compared to reference genomes.
 
 - [[bash script]](https://htmlpreview.github.io/?) Read alignment 
-- [[bash script]](https://htmlpreview.github.io/?} Breseq   
+- [[bash script]](https://htmlpreview.github.io/?) Breseq   
