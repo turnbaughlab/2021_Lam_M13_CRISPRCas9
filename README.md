@@ -3,7 +3,7 @@
 **Author**: Kathy N. Lam\
 **Updated**: April 12, 2021
 
-The following code and scripts are provided for analyses performed in Lam *et al.*, 2021. Phage-delivered CRISPR-Cas9 for strain-specific depletion and
+The following code, scripts, and data are provided for analyses performed in Lam *et al.*, 2021. Phage-delivered CRISPR-Cas9 for strain-specific depletion and
 genomic deletions in the gut microbiota. [[bioRxiv]](https://www.biorxiv.org/content/10.1101/2020.07.09.193847v1.full)
 
 ## Flow cytometry
