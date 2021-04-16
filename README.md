@@ -35,9 +35,9 @@ Sequencing reads derived from isolates were processed and compared to reference 
 
 Complete reference genomes were generated using Nanopore/Illumina hybrid assembly.
 
-- [[fasta file]]() *E. coli* W1655 F+ (ATCC 23590 / KL68)
-- [[fasta file]]() *E. coli* W1655 F+ *sfgfp* (KL114)
-- [[fasta file]]() *E. coli* W1655 F+ *sfgfp mcherry* (KL204)
+- [[fasta file]](https://github.com/turnbaughlab/2021_Lam_M13_CRISPRCas9/blob/main/KL68.fasta) *E. coli* W1655 F+ (ATCC 23590 / KL68)
+- [[fasta file]](https://github.com/turnbaughlab/2021_Lam_M13_CRISPRCas9/blob/main/KL114.fasta) *E. coli* W1655 F+ *sfgfp* (KL114)
+- [[fasta file]](https://github.com/turnbaughlab/2021_Lam_M13_CRISPRCas9/blob/main/KL204.fasta) *E. coli* W1655 F+ *sfgfp mcherry* (KL204)
 
 ## CRISPR-Cas9 phagemid sequences
 
