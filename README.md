@@ -10,8 +10,8 @@ genomic deletions in the gut microbiota. [[bioRxiv version]](https://www.biorxiv
 
 Flow cytometry data, from in vitro bacterial cultures or from mouse stool resuspensions, were analyzed using R.
 
-- [[R notebook]](https://htmlpreview.github.io/?) Flow cytometry for in vitro: *E. coli sfgfp* vs *E. coli mcherry* with GFPT-M13 at 8h
-- [[R notebook]](https://htmlpreview.github.io/?) Flow cytometry for in vitro: *E. coli sfgfp* vs *E. coli mcherry* with GFPT-M13 at 8h vs 24h
+- [[R notebook]](https://htmlpreview.github.io/?https://github.com/turnbaughlab/2021_Lam_M13_CRISPRCas9/blob/main/2019-11-20_flow.html) Flow cytometry for in vitro: *E. coli sfgfp* vs *E. coli mcherry* with GFPT-M13 at 8h
+- [[R notebook]](https://htmlpreview.github.io/?https://github.com/turnbaughlab/2021_Lam_M13_CRISPRCas9/blob/main/2019-11-05_flow.html) Flow cytometry for in vitro: *E. coli sfgfp* vs *E. coli mcherry* with GFPT-M13 at 8h vs 24h
 - [[R notebook]](https://htmlpreview.github.io/?https://github.com/turnbaughlab/2021_Lam_M13_CRISPRCas9/blob/main/2020-01-13_flow_exp17.html) Flow cytometry for mouse exp17: *E. coli sfgfp* vs *E. coli mcherry* with GFPT-M13
 - [[R notebook]](https://htmlpreview.github.io/?) Flow cytometry for mouse exp19: *E. coli sfgfp mcherry* with GFPT-M13
 
