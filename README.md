@@ -39,9 +39,9 @@ Complete reference genomes were generated using Nanopore/Illumina hybrid assembl
 - [[fasta file]](https://github.com/turnbaughlab/2021_Lam_M13_CRISPRCas9/blob/main/KL114.fasta) *E. coli* W1655 F+ *sfgfp* (KL114)
 - [[fasta file]](https://github.com/turnbaughlab/2021_Lam_M13_CRISPRCas9/blob/main/KL204.fasta) *E. coli* W1655 F+ *sfgfp mcherry* (KL204)
 
-## CRISPR-Cas9 phagemid sequences
+## M13 CRISPR-Cas9 phagemid sequences
 
-Constructed M13-compatible CRISPR-Cas9 phagemid vectors were designed as GFP-targeting (GFPT) or Non-targeting (NT).
+Constructed CRISPR-Cas9 phagemid vectors were designed as GFP-targeting (GFPT) or Non-targeting (NT).
 
 - [[Genbank file]](https://github.com/turnbaughlab/2021_Lam_M13_CRISPRCas9/blob/main/pCas9-GFPT-f1A.gb) pCas9-GFPT-f1A (pKL100)
 - [[Genbank file]](https://github.com/turnbaughlab/2021_Lam_M13_CRISPRCas9/blob/main/pCas9-GFPT-f1B.gb) pCas9-GFPT-f1B (pKL101)
