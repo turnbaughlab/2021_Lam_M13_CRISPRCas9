@@ -25,7 +25,7 @@ Samples were processed using primary qPCR/secondary PCR, sequencing reads were p
 
 ## Genomic deletions
 
-Sequencing reads derived from in vitro and in vivo isolates were processed and compared to reference genomes.
+Sequencing reads derived from isolates were processed and compared to reference genomes on the UCSF computing cluster.
 
 - [[bash script]]() Read depth using bowtie2 and samtools 
 - [[bash script]]() Deletion prediction using breseq   
