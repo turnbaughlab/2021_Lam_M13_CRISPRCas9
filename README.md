@@ -41,7 +41,7 @@ Complete reference genomes were generated using Nanopore/Illumina hybrid assembl
 
 ## CRISPR-Cas9 phagemid sequences
 
-Constructed M13-compatible CRISPR-Cas9 phagemid vectors were designed as GFP-targeting or Non-targeting.
+Constructed M13-compatible CRISPR-Cas9 phagemid vectors were designed as GFP-targeting (GFPT) or Non-targeting (NT).
 
 - [[Genbank file]]() pCas9-GFPT-f1A (pKL100)
 - [[Genbank file]]() pCas9-GFPT-f1B (pKL101)
