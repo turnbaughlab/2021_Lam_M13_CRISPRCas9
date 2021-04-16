@@ -28,7 +28,7 @@ Samples were processed using primary qPCR/secondary PCR, sequencing reads were p
 Sequencing reads derived from isolates were processed and compared to reference genomes on the UCSF computing cluster.
 
 - [[bash script]]() Read depth using bowtie2 and samtools 
-- [[bash script]]() Deletion prediction using breseq   
+- [[bash script]](https://github.com/turnbaughlab/2021_Lam_M13_CRISPRCas9/blob/main/q-breseq.sh) Deletion prediction using breseq   
 
 
 ## Reference genome assemblies
