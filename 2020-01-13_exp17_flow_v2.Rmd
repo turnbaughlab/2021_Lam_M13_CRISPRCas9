@@ -1,0 +1,564 @@
+---
+title: 'Flow cytometry for mouse exp17: GFP-targeting of E. coli sfgfp in competition with E. coli mcherry'
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    df_print: paged
+---
+
+******************************************************* 
+
+Authored: Kathy N. Lam 
+
+Experiment: January 13, 2020
+
+Updated: `r format(Sys.Date(), "%B %d, %Y")`
+
+
+## Set up
+
+<style type="text/css">
+div.main-container {
+  max-width: 100% !important;
+}
+.tocify {
+  max-width: 100% !important;
+}
+.toc-content {
+  padding-left: 0px !important;
+}
+</style>
+
+```{r, message=FALSE, warning=FALSE}
+library(flowCore) #for reading and manipulating flow data
+library(ggcyto) #for using ggplot with flow data
+library(scales) #for nice plot axes
+library(cowplot) #for multi panel plots
+library(Phenoflow) #for rarefying
+library(tidyverse) #for data wrangling and plotting
+```
+
+
+## Read data
+
+```{r}
+(fs = read.flowSet(path="data_fcs"))
+```
+
+```{r}
+colnames(fs) 
+```
+
+```{r}
+pData(phenoData(fs))
+```
+
+```{r}
+#read in sample info
+metadata = read_tsv("metadata.tsv") %>%
+    rename(name=Filename) %>%
+    mutate(Mouse = paste("Mouse", Mouse)) %>%
+    mutate(Day = paste("Day", Timepoint)) %>%
+    mutate(Treatment_Mouse = paste0(Treatment, "\n", Mouse)) %>%
+    mutate(Mouse_Treatment = paste0(Mouse, " (", Treatment, ")"))
+
+metadata$Mouse = factor(metadata$Mouse, levels=unique(metadata$Mouse))
+metadata$Treatment_Mouse = factor(metadata$Treatment_Mouse, levels=unique(metadata$Treatment_Mouse))
+metadata$Treatment = factor(metadata$Treatment, levels=unique(metadata $Treatment))
+metadata$Day = factor(metadata$Day, levels=unique(metadata$Day))
+metadata
+```
+
+```{r}
+#add columns to phenoData  
+phenoData(fs)$Order = seq(1, length(phenoData(fs)$name))
+phenoData(fs)$Treatment = metadata$Treatment
+phenoData(fs)$Timepoint = metadata$Timepoint
+phenoData(fs)$Day = metadata$Day
+phenoData(fs)$Name = metadata$name
+phenoData(fs)$Mouse = metadata$Mouse
+phenoData(fs)$Treatment_Mouse = metadata$Treatment_Mouse
+phenoData(fs)$Mouse_Treatment = metadata$Mouse_Treatment
+pData(phenoData(fs))
+```
+
+```{r}
+#make labeller function for facet_wrap
+order = as.character(phenoData(fs)$Order)
+name = phenoData(fs)$Name
+
+order_names = mapply(c, order, name, SIMPLIFY = FALSE) #make a one-to-one 
+order_names = lapply(order_names, `[[`, 2) #keep second element of each vector in the list
+order_names = order_names[as.character(sort(as.numeric(names(order_names))))] #numerically sort 
+
+order_labeller = function(variable,value){
+  return(order_names[value])
+}
+```
+
+
+## Gate on scatter
+
+```{r, fig.width=12, fig.height=40}
+
+scatter = rbind(c(0,   1e4), 
+                c(1e5, 1e4),
+                c(1e5, 2.5e5),  
+                c(0,   2.5e5))
+colnames(scatter)=c("FSC-A", "SSC-A")
+scatter = as.data.frame(scatter)
+
+ggplot() + 
+    geom_point(data=fs, aes(x=`FSC-A`, y=`SSC-A`), shape=16, size=0.75, alpha=0.5) +
+    scale_y_continuous(name="SSC-A (Granularity)\n", limits = c(-2e1,3e5)) +
+    scale_x_continuous(name="\nFSC-A (Size)", limit=c(-2e1,3e5)) +
+    facet_grid(Mouse~Timepoint) +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank(), axis.text.x=element_text(angle=90,hjust=1)) +
+    geom_polygon(data=scatter, aes(x=`FSC-A`, y=`SSC-A`), fill=NA, colour="indianred", size=0.5,  linetype="solid") 
+```
+
+<br>
+
+```{r}
+gate_scatter = polygonGate(filterId="scatter", `FSC-A` = scatter$`FSC-A`, `SSC-A` = scatter$`SSC-A`) 
+result = flowCore::filter(fs, gate_scatter)
+events = flowCore::Subset(fs, result)
+```
+
+
+## Rarefy
+
+```{r}
+events = Phenoflow::FCS_resample(events, replace = FALSE)
+```
+
+
+## Gate on fluorescence 
+
+```{r, fig.width=12, fig.height=40}
+
+red = rbind(
+    c(-1e3,   4e3),
+    c(-1e3,   4e5),
+    c( 4000,  4e5),
+    c( 1000,  4e3))
+colnames(red)=c("530/30 Blue B-A", "610/20 YG C-A")
+red = as.data.frame(red)
+
+green = rbind(
+    c(9e2,   -1e3),
+    c(4.5e3,  800),
+    c(1.5e5,    800),
+    c(1.5e5,   -1e3))
+colnames(green)=c("530/30 Blue B-A", "610/20 YG C-A")
+green = as.data.frame(green)
+
+ggplot() + 
+    geom_polygon(data=green, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), fill=NA, colour="green4", size=0.5, linetype="solid") +
+    geom_polygon(data=red, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), fill=NA, colour="red3", size=0.5, linetype="solid") +
+    geom_point(data=events, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2) +
+    theme_linedraw(12) +
+    ggcyto::scale_y_flowJo_biexp(name="mCherry intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1e3, 4e5)) +
+    ggcyto::scale_x_flowJo_biexp(name="GFP intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1e3, 1.5e5)) +
+    theme(panel.grid = element_blank(), 
+          axis.title.x = element_text(colour="green4"), 
+          axis.title.y = element_text(colour="red3")) +
+    facet_grid(Mouse~Timepoint)  
+```
+
+```{r}
+gate_green = polygonGate(filterId="green", `530/30 Blue B-A` = green$`530/30 Blue B-A`, `610/20 YG C-A` = green$`610/20 YG C-A`)
+result_green = flowCore::filter(events, gate_green)
+events_green = Subset(events, result_green)
+```
+
+```{r}
+gate_red = polygonGate(filterId="red", `530/30 Blue B-A` = red$`530/30 Blue B-A`, `610/20 YG C-A` = red$`610/20 YG C-A`)
+result_red = flowCore::filter(events, gate_red)
+events_red = Subset(events, result_red)
+```
+
+```{r}
+percent_red = toTable(summary(result_red)) %>% 
+    mutate(x=2e5, y=2e5, colour="red", order=phenoData(events)$order) %>%
+    rename(name=sample) %>%
+    left_join(metadata, by="name")
+
+percent_green = toTable(summary(result_green)) %>%
+    mutate(x=2e5, y=1e5, colour="green", order=phenoData(events)$order) %>%
+    rename(name=sample) %>%
+    left_join(metadata, by="name")
+
+percentage = bind_rows(percent_red, percent_green) %>%
+    group_by(name) %>% 
+    mutate(total_gfp_mcherry = sum(true)) %>%
+    mutate(fraction_fluor = round(true/total_gfp_mcherry, 3)) %>%
+    mutate(percent_fluor = fraction_fluor*100) %>%
+    mutate(label = paste(true, "events"))
+    
+```
+
+```{r, fig.width=12, fig.height=40}
+ggplot() + 
+    geom_point(data=events, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="black") +
+    geom_point(data=events_green, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="green4") +
+    geom_point(data=events_red, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="red3") +
+    geom_text(data=percentage, aes(x=x, y=y, label=label, colour=colour), size=3, hjust=1) +
+    geom_text(data=percentage, aes(x=2e5, y=4e5, label=paste0(count, " events total")), colour="grey27", size=3, hjust=1) +
+    scale_colour_manual(values=c("green4", "red3")) +
+    ggcyto::scale_y_flowJo_biexp(name="mCherry intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1e3, 5.5e5)) +
+    ggcyto::scale_x_flowJo_biexp(name="GFP intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1e3, 3e5)) +
+    theme_linedraw(12) +
+    theme(panel.grid = element_blank(), 
+          axis.title.x = element_text(colour="green4"), 
+          axis.title.y = element_text(colour="red3"), 
+          legend.position = "none") +
+    facet_grid(Mouse~Timepoint) 
+
+ggsave("figures/exp17_GFP_mCherry_scatterplot.png", width=12, height=40, dpi=150)
+```
+
+
+## Make plots split on NT / GFPT
+
+```{r, fig.width=12, fig.height=20}
+samples = metadata %>%
+    filter(Treatment == "NT") %>%
+    pull(FlowSampleNumber)
+
+percentage_samples = percentage %>%
+    filter(FlowSampleNumber %in% samples)
+
+ggplot() + 
+    geom_point(data=events[samples], aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="black") +
+    geom_point(data=events_green[samples], aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="green4") +
+    geom_point(data=events_red[samples], aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="red3") +
+    geom_text(data=percentage_samples, aes(x=x, y=y, label=label, colour=colour), size=3, hjust=1) +
+    geom_text(data=percentage_samples, aes(x=2e5, y=4e5, label=paste0(count, " events total")), colour="grey27", size=3, hjust=1) +
+    scale_colour_manual(values=c("green4", "red3")) +
+    ggcyto::scale_y_flowJo_biexp(name="mCherry intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1e3, 5.5e5)) +
+    ggcyto::scale_x_flowJo_biexp(name="GFP intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1e3, 3e5)) +
+    theme_linedraw(12) +
+    theme(panel.grid = element_blank(), 
+          axis.title.x = element_text(colour="green4"), 
+          axis.title.y = element_text(colour="red3"), 
+          legend.position = "none") +
+    facet_grid(Mouse_Treatment~Day) 
+
+ggsave("figures/exp17_GFP_mCherry_scatterplot_NT.png", width=12, height=20, dpi=150)
+```
+
+```{r, fig.width=12, fig.height=20}
+samples = metadata %>%
+    filter(Treatment == "GFPT") %>%
+    pull(FlowSampleNumber)
+
+percentage_samples = percentage %>%
+    filter(FlowSampleNumber %in% samples)
+
+ggplot() + 
+    geom_point(data=events[samples], aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="black") +
+    geom_point(data=events_green[samples], aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="green4") +
+    geom_point(data=events_red[samples], aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="red3") +
+    geom_text(data=percentage_samples, aes(x=x, y=y, label=label, colour=colour), size=3, hjust=1) +
+    geom_text(data=percentage_samples, aes(x=2e5, y=4e5, label=paste0(count, " events total")), colour="grey27", size=3, hjust=1) +
+    scale_colour_manual(values=c("green4", "red3")) +
+    ggcyto::scale_y_flowJo_biexp(name="mCherry intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1e3, 5.5e5)) +
+    ggcyto::scale_x_flowJo_biexp(name="GFP intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1e3, 3e5)) +
+    theme_linedraw(12) +
+    theme(panel.grid = element_blank(), 
+          axis.title.x = element_text(colour="green4"), 
+          axis.title.y = element_text(colour="red3"), 
+          legend.position = "none") +
+    facet_grid(Mouse_Treatment~Day) 
+
+ggsave("figures/exp17_GFP_mCherry_scatterplot_GFPT.png", width=12, height=20, dpi=150)
+```
+
+
+## Make plots for representative mice
+
+```{r, fig.width=12, fig.height=5}
+subset = c("Mouse 2", "Mouse 15")
+
+samples = metadata %>% 
+    filter(Mouse %in% subset) %>%
+    pull(FlowSampleNumber)
+
+percentage_samples = percentage %>% 
+    filter(Mouse %in% subset)
+
+ggplot() + 
+    geom_point(data=events[samples], aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="black") +
+    geom_point(data=events_green[samples], aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="green4") +
+    geom_point(data=events_red[samples], aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="red3") +
+    geom_text(data=percentage_samples, aes(x=x, y=y, label=label, colour=colour), size=3, hjust=1) +
+    geom_text(data=percentage_samples, aes(x=2e5, y=4e5, label=paste0(count, " events total")), colour="grey27", size=3, hjust=1) +
+    scale_colour_manual(values=c("green4", "red3")) +
+    ggcyto::scale_y_flowJo_biexp(name="mCherry intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1e3, 5.5e5)) +
+    ggcyto::scale_x_flowJo_biexp(name="GFP intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1e3, 3e5)) +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank(), 
+          panel.border = element_rect(size=1.25),
+          axis.title.x = element_text(colour="green4"), 
+          axis.title.y = element_text(colour="red3"), 
+          legend.position = "none") +
+    facet_grid(Treatment_Mouse~Day) 
+
+ggsave("figures/exp17_GFP_mCherry_scatterplot_M2_M15.png", width=12, height=5, dpi=150)
+```
+
+
+## Calculate and subtract background 
+
+```{r}
+#calculate max observed for green or red for later filtering
+bg_green_high = percentage %>%
+    filter(population == "green+", Timepoint == -3) %>%
+    pull(true) %>%
+    max()
+
+bg_red_high = percentage %>%
+    filter(population == "red+", Timepoint == -3) %>%
+    pull(true) %>%
+    max()
+
+#set background for both green/red based on each mouse
+percentage = percentage %>%
+    group_by(Mouse, population) %>%
+    mutate(bg = true[which(Timepoint == -3)]) %>%
+    ungroup() %>%
+    mutate(positive_events_minusbg = true - bg)
+
+#set all negative values or 0 values to one
+percentage = percentage %>%
+    mutate(positive_events_minusbg_nozeros = as.double(positive_events_minusbg)) %>%
+    mutate(positive_events_minusbg_nozeros = case_when(positive_events_minusbg_nozeros <= 0 ~ 1, 
+                                               positive_events_minusbg_nozeros > 0 ~ positive_events_minusbg_nozeros))
+```
+
+
+## Plot events over time for individual mice
+
+```{r, fig.height=8, fig.width=12}
+ggplot(percentage) +
+    annotate("rect", xmin=0.25, xmax=7.25, ymin=0, ymax=Inf, fill="honeydew2", colour=NA, alpha=0.75) +
+    geom_line(aes(x=Timepoint, y=positive_events_minusbg_nozeros, colour=population, group=interaction(Mouse, population)), size=1) +
+    geom_point(aes(x=Timepoint, y=positive_events_minusbg_nozeros, colour=population), size=2, alpha=1) +
+    scale_y_log10(name="Positive events \n(background subtracted)\n", labels = trans_format("log10", math_format(10^.x))) + 
+    scale_x_continuous(name="Day", breaks=seq(-4,15,2)) +
+    scale_colour_manual(values=c("green4", "red3")) +
+    theme_linedraw(12) +
+    theme(panel.grid = element_blank(), panel.grid.major.y = element_blank(), panel.border=element_rect(size=1.5), legend.position = "top") +
+    annotation_logticks(sides="l") +
+    facet_wrap(~Mouse_Treatment)
+
+ggsave("figures/exp17_timecourse_green_red_byMouse_unfiltered.png",  height=8, width=12, dpi=150)
+```
+
+```{r}
+#filter out timepoints where red AND green are both below the highest background observed for each multiplied by a factor
+percentage_filtered = percentage %>%
+    mutate(bg_high = case_when(population == "green+" ~ bg_green_high, population == "red+" ~ bg_red_high)) %>%  #background depending on fluor
+    mutate(below_background = ifelse(true > bg_high * 3, "no", "yes")) %>%                                       #mark whether above or below background
+    mutate(Mouse_Timepoint = paste(Mouse, Timepoint))
+
+#make new table of mouse+timepoint to filter by 
+filter_below = percentage_filtered %>%
+    select(Mouse, Timepoint, Mouse_Timepoint, population, bg, below_background) %>%
+    filter(below_background == "yes") %>% 
+    filter(Timepoint != -3) %>%
+    pivot_wider(names_from=population, values_from=bg) %>%
+    filter(is.na(`green+`) == FALSE & is.na(`red+`) == FALSE)
+
+`%notin%` <- Negate(`%in%`)
+
+percentage_filtered = percentage_filtered %>%
+    filter(Mouse_Timepoint %notin% filter_below$Mouse_Timepoint)
+    
+```
+
+```{r, fig.height=8, fig.width=12}
+ggplot(percentage_filtered) +
+    annotate("rect", xmin=0.25, xmax=7.25, ymin=0, ymax=Inf, fill="honeydew2", colour=NA, alpha=0.75) +
+    geom_point(aes(x=Timepoint, y=positive_events_minusbg_nozeros, colour=population), size=2, alpha=1) +
+    geom_line(aes(x=Timepoint, y=positive_events_minusbg_nozeros, colour=population, group=interaction(Mouse, population)), size=1) +
+    scale_y_log10(name="Positive events \n(background subtracted)\n", labels = trans_format("log10", math_format(10^.x))) + 
+    scale_x_continuous(name="Day", breaks=seq(-4,15,2)) +
+    scale_colour_manual(values=c("green4", "red3")) +
+    theme_linedraw(12) +
+    theme(panel.grid = element_blank(), panel.grid.major.y = element_blank(), panel.border=element_rect(size=1.5), legend.position = "top") +
+    annotation_logticks(sides="l") +
+    facet_wrap(~Mouse_Treatment)
+
+ggsave("figures/exp17_timecourse_green_red_byMouse.png", height=8, width=12, dpi=150)
+ggsave("figures/exp17_timecourse_green_red_byMouse.pdf", height=8, width=12)
+```
+
+## Facet events over time by treatment 
+
+```{r, fig.width=12, fig.height=6}
+percentage_filtered = percentage_filtered %>%
+    mutate(Treatment_Full = gsub("NT", "Non-Targeting", Treatment)) %>%
+    mutate(Treatment_Full = gsub("GFPT", "GFP-Targeting", Treatment_Full)) %>%
+    mutate(Treatment_Full = factor(Treatment_Full, levels=c("Non-Targeting", "GFP-Targeting")))
+
+set.seed(111)
+
+#median
+ggplot(percentage_filtered) +
+    annotate("rect", xmin=0.75, xmax=7.75, ymin=0, ymax=Inf, fill="honeydew2", colour=NA, alpha=0.75) +
+    geom_jitter(aes(x=Timepoint, y=positive_events_minusbg_nozeros, colour=population), position=position_jitterdodge(dodge.width=1.1), size=2, alpha=0.5) +
+    stat_summary(aes(x=Timepoint, y=positive_events_minusbg_nozeros, group=population, colour=population), size=0.75, alpha=1, 
+                 geom="line", position=position_dodge(width=0.5), fun = median) +
+    stat_summary(aes(x=Timepoint, y=positive_events_minusbg_nozeros, group=factor(interaction(population, Timepoint)), colour=population), size=0.75, alpha=1, 
+                 geom="pointrange", position=position_dodge(width=1), fun = median, fun.min = min, fun.max = max) +
+    scale_y_log10(name="Positive events\n(background subtracted)", limits=c(1,40000)) + 
+    scale_x_continuous(name="Day", breaks=seq(-4,15,2)) +
+    scale_colour_manual(values=c("green4", "red3"), labels=c("GFP+", "mCherry+")) +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank(), panel.grid.major.y = element_blank(), panel.border=element_rect(size=1.5), legend.position = "top") +
+    annotation_logticks(sides="l") +
+    facet_wrap(~Treatment_Full, scales="free_y")
+
+ggsave("figures/exp17_timecourse_green_red_byTreatment_pointrange_median.png", width=12, height=6, dpi=150)
+ggsave("figures/exp17_timecourse_green_red_byTreatment_pointrange_median.pdf", width=12, height=6)
+```
+
+
+## Plot percent red / green at Day 14
+
+```{r}
+dayfourteen = percentage_filtered %>%
+    filter(Timepoint == 14) 
+```
+
+```{r}
+#calculate percent positive green/red using background subtracted-positive events (no negatives)
+dayfourteen = dayfourteen %>%
+    mutate(positive_events_minusbg_nonegs = as.double(positive_events_minusbg)) %>%
+    mutate(positive_events_minusbg_nonegs = case_when(positive_events_minusbg_nonegs <= 0 ~ 0, 
+                                                      positive_events_minusbg_nonegs > 0 ~ positive_events_minusbg_nonegs)) %>%
+    group_by(Mouse, Timepoint) %>%
+    mutate(positive_events_minusbg_nonegs_gfp_mcherry_total = sum(positive_events_minusbg_nonegs)) %>%
+    mutate(positive_events_minusbg_nonegs_percent_fluor = positive_events_minusbg_nonegs / positive_events_minusbg_nonegs_gfp_mcherry_total * 100) %>%
+    ungroup()
+```
+
+
+```{r}
+#order mice by green fluor
+green_ranked = dayfourteen %>%
+    filter(population=="green+") %>%
+    arrange(Treatment, positive_events_minusbg_nonegs_percent_fluor) %>%
+    pull(Mouse)
+
+dayfourteen = dayfourteen %>% 
+    mutate(Mouse = factor(Mouse, levels=rev(green_ranked))) %>%
+    mutate(population = factor(population, levels=c("red+", "green+")))
+
+#make df of labels to plot percentage red value on bar plot
+labels = dayfourteen %>%
+    filter(population == "green+") %>%
+    mutate(labels = paste0(round(positive_events_minusbg_nonegs_percent_fluor, 0), "%")) 
+```
+
+
+```{r, fig.height=6, fig.width=7}
+ggplot() +
+     geom_bar(data=dayfourteen, aes(x=Mouse, y=positive_events_minusbg_nonegs_percent_fluor, fill=population), stat = "identity") +
+     geom_text(data=labels, aes(x=Mouse, y=case_when(positive_events_minusbg_nonegs_percent_fluor > 10 ~ positive_events_minusbg_nonegs_percent_fluor - 4, 
+                                                     positive_events_minusbg_nonegs_percent_fluor < 10 ~ positive_events_minusbg_nonegs_percent_fluor + 3),
+                                label=labels), colour="white", size=3.5) +
+     scale_fill_manual(values = c("red3", "green4"), labels=c("mCherry+", "GFP+")) +
+     scale_y_continuous(name="Day 14  Percent GFP+ and mCherry+ events \n(background subtracted)", 
+                        expand = c(0, 0), position="right", breaks=c(0,25,50,75,100), labels=c(0,25,50,75,100)) +
+     scale_x_discrete(name = "", position = "top") +
+     coord_flip() +
+     theme_linedraw(14) +
+     theme(legend.position = "bottom", legend.title=element_blank(), panel.grid=element_blank(),
+           plot.margin=unit(c(5, 5, 5, 15),"mm"), 
+           panel.border = element_rect(size=1.25)) +
+     guides(fill = guide_legend(nrow = 1))
+
+ggsave("figures/exp17_percent_green_red_barplot.pdf", height=6, width=7)
+```
+
+
+## Calculate significance Day 14
+
+```{r}
+dayfourteen_green = dayfourteen %>%
+    filter(population=="green+") %>%
+    mutate(Treatment = factor(Treatment, levels=c("NT", "GFPT")))
+
+nt = dayfourteen_green %>% 
+    filter(Treatment=="NT") %>%
+    pull(positive_events_minusbg_nonegs_percent_fluor)
+
+gfpt = dayfourteen_green %>% 
+    filter(Treatment=="GFPT") %>%
+    pull(positive_events_minusbg_nonegs_percent_fluor)
+
+(mean_nt = round(mean(nt), 0))
+(mean_gfpt = round(mean(gfpt), 0))
+(median_nt = round(median(nt), 0))
+(median_gfpt = round(median(gfpt), 0))
+```
+
+```{r}
+#do mann whitney wilcoxon test for nonparametric distribution
+(test = wilcox.test(gfpt, nt, alternative = "less"))
+pvalue = formatC(test$p.value, format = "e", digits = 2) 
+```
+
+```{r, fig.height=6, fig.width=4}
+
+ggplot(dayfourteen_green, aes(x=Treatment, y=percent_fluor, fill=population)) +
+    geom_bar(stat="summary", fun = median, colour="black", size=0.75, width=0.5) + 
+    geom_jitter(width=0.2, height=0.2, shape=21, colour="black", fill="white", size=4, stroke=1) +
+    scale_fill_manual(values=c("green4")) +
+    scale_x_discrete(name="") +
+    scale_y_continuous(name="Day 14  Percent GFP+ events \n(background subtracted)", expand=c(0,0), limits=c(0, 120), breaks=seq(0,100,20)) +
+    annotate("text", x=1.5, y=114, label=paste("p =", pvalue), size=4) +
+    annotate("text", x=1.025, y=median_nt+6, label=paste0("median ", median_nt,"%"), size=4, colour="green4") +
+    annotate("text", x=2.025, y=median_gfpt+11, label=paste0("median ", median_gfpt,"%"), size=4, colour="green4") +
+    geom_segment(x=1, xend=2, y=110, yend=110) +
+    theme_linedraw(15) +
+    theme(panel.border = element_rect(size=1.5), panel.grid = element_blank(), legend.position="none",
+          axis.text.x = element_text(size=16), axis.ticks.x = element_blank())
+
+ggsave("figures/exp17_Day14_green_barplot_pvalue_median.pdf", height=6, width=4)
+```
+
+
+## Log session
+
+```{r}
+sessionInfo()
+
+```
+
+
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>

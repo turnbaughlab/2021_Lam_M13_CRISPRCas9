@@ -1,0 +1,328 @@
+---
+title: "exp11: Estimate load from qPCR of 16S rRNA gene (primary PCR)"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    df_print: paged
+---
+
+****************
+
+Author: Kathy N. Lam
+
+Experiment: February 4, 2019
+
+Updated: `r format(Sys.Date(), "%B %d, %Y")`
+
+
+## Set up
+
+<style type="text/css">
+div.main-container {
+  max-width: 100% !important;
+}
+.tocify {
+  max-width: 100% !important;
+}
+.toc-content {
+  padding-left: 0px !important;
+}
+body{
+  font-family: Arial;
+  font-size: 12pt;
+}
+</style>
+
+
+```{r, message=FALSE, warning=FALSE}
+library(scales) #for nice axes
+library(stringr) #for regex
+library(gtools) #for natural sort
+library(tidyverse) #for data wrangling and plotting
+```
+
+
+## Read mapping file
+
+```{r}
+mapping = read.csv("mapping/mapping.csv", header=TRUE, na.strings = "", colClass="character", strip.white=TRUE) 
+    
+#make well column with leading zeros (cq file has leading zeros; amplification file does not)
+mapping = mapping %>%
+    mutate(Column2 = gsub("^([1-9]{1})$", "0\\1",Column)) %>%
+    mutate(Well2 = paste0(Row, Column2)) %>%
+    rename(Well=Well2, Well2=Well, Well3=Well_Alt) %>%
+    mutate(Mouse = stringr::str_match(Sample, "(M[0-9]{1,2}).*")[,2]) %>% #second item is capture group; first is whole string match
+    mutate(Timepoint = stringr::str_match(Sample, "M[0-9]{1,2} (.*)")[,2])
+
+```
+
+
+## Read data and merge all
+
+```{r}
+#end point data
+ep = read.csv("data/csv/2019-02-04 -  End Point Results_SYBR.csv", header = TRUE, strip.white = TRUE)  %>%
+    select(Well, End.RFU)
+
+#quantification cycle data
+cq = read.csv("data/csv/2019-02-04 -  Quantification Cq Results_0.csv", header = TRUE, strip.white = TRUE) %>%
+    select(Well, Cq)
+
+#amplification data
+qa = read.csv("data/csv/2019-02-04 -  Quantification Amplification Results_SYBR.csv", header = TRUE, strip.white = TRUE) %>%
+    select(-X) %>%
+    pivot_longer(cols=c(-Cycle), names_to="Well", values_to="RFU") %>%
+    #add an extra preceding zero for wells with only one digit
+    mutate(Well=case_when(is.na(stringr::str_match(Well, "^([A-Z]{1})[0-9]{1}$"))[,2]==TRUE ~ 
+                               Well,
+                           is.na(stringr::str_match(Well, "^([A-Z]{1})[0-9]{1}$"))[,2]==FALSE ~
+                               paste0(stringr::str_match(Well, "^([A-Z]{1})[0-9]{1}$")[,2],
+                                      "0", 
+                                      stringr::str_match(Well, "^[A-Z]{1}([0-9]{1})$")[,2])))
+    
+#merge all
+data = left_join(ep, cq, by="Well") %>%
+    left_join(qa, by="Well") %>%
+    left_join(mapping, by="Well", .keep_all=TRUE) %>%
+    filter(is.na(Sample)==FALSE)        
+```
+
+
+## Examine mouse samples only
+
+```{r}
+mouse = data %>%
+    filter(is.na(Mouse) == FALSE) %>%
+    mutate(Mouse=factor(Mouse, levels=c(gtools::mixedsort(unique(Mouse))))) %>%
+    mutate(Timepoint=factor(Timepoint, levels=c("Pre-Sm", "Pre-Col", "T = -2", "T = 0", "T = 1", "T = 2")))
+
+#add column for colours
+colours = mouse %>%
+    arrange(factor(Timepoint, levels = c("Pre-Sm", "Pre-Col", "T = -2", "T = 0", "T = 1", "T = 2"))) %>%
+    select(Timepoint) %>%
+    unique() %>%
+    add_column(Colour=c("forestgreen", "darkmagenta", "gold", "coral", "steelblue", "indianred"))
+
+mouse = mouse %>%
+    left_join(colours, by="Timepoint")
+
+#make new df for colour legend
+colourpalette = colours$Colour
+names(colourpalette) = colours$Category
+```
+
+
+## Examine amplification for undiluted samples
+
+```{r, fig.width=12, fig.height=20}
+mouse_undiluted = mouse %>%
+    filter(Dilution=="undiluted")
+
+ggplot(mouse_undiluted, aes(x=Cycle, y=RFU, group=Well)) +
+    geom_line(size=0.75, alpha=0.75, colour="indianred") +
+    theme_linedraw(12) +
+    facet_grid(Mouse~Timepoint) +
+    theme(legend.position = "top", panel.grid = element_blank()) +
+    scale_colour_manual(values=c("indianred", "darkred")) 
+
+```
+
+
+## Estimate load from Cq and normalize
+
+```{r}
+weights = read_tsv("mapping/weights.tsv")
+```
+
+
+```{r, fig.width=7, fig.height=4}
+set.seed(11)
+
+mouse_undiluted = mouse_undiluted %>%
+    select(Cq, Sample, Timepoint) %>%
+    distinct() 
+
+ggplot(mouse_undiluted, aes(x=Timepoint, y=Cq, fill=Timepoint)) +
+    geom_point(stat="summary", fun=mean, colour="indianred", shape=95, size=25) +
+    geom_jitter(height=0, width=0.25, shape=21, size=2.5) +
+    scale_fill_manual(values = colourpalette) +
+    scale_y_continuous() +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank(), legend.position = "none")
+```
+
+
+
+```{r}
+#invert Cq; calculate Load; normalize to weight
+mouse_undiluted_normalized = mouse_undiluted %>%
+    mutate(RelativeLoadLog2 = (Cq * -1))  %>%
+    mutate(RelativeLoad = 2^RelativeLoadLog2) %>%
+    left_join(weights, by="Sample") %>%
+    mutate(Gram = as.numeric(mg) / 1000) %>% #divide by weight of pellet
+    mutate(RelativeLoadPerGram = RelativeLoad / Gram * 100/4 * 650/200) #account for 4/100ul gDNA used; 200/650ul lysate taken
+
+#calculate Pre-Sm mean to normalize to, setting the first timepoint to ~1 
+PreSm_median = mouse_undiluted_normalized %>%
+    filter(Timepoint=="Pre-Sm") %>%
+    pull(RelativeLoadPerGram) %>%
+    median()
+
+mouse_undiluted_normalized = mouse_undiluted_normalized %>%
+    mutate(RelativeLoadPerGram = RelativeLoadPerGram / PreSm_median)
+```
+
+```{r}
+#calculate median for each timepoint to annotate plot
+(medians = mouse_undiluted_normalized %>%
+    select(Timepoint, RelativeLoadPerGram) %>%
+    group_by(Timepoint) %>%
+    summarize(MedianLoad=median(RelativeLoadPerGram)))
+```
+
+```{r, fig.width=8, fig.height=5}
+set.seed(11)
+
+ggplot(mouse_undiluted_normalized, aes(x=Timepoint, y=RelativeLoadPerGram)) +
+    geom_point(stat="summary", fun.y=median, colour="indianred", shape=95, size=30) +
+    geom_jitter(aes(fill=Timepoint), height=0, width=0.3, shape=21, size=2.5, stroke=0.75) +
+    geom_text(data=medians, aes(x=Timepoint, y=10^2, label=format(round(MedianLoad, digits=3), nsmall=2)), colour="indianred") +
+    scale_fill_manual(values=colourpalette) +
+    scale_y_log10(name = "Relative bacterial load per gram", 
+                  labels = scales::trans_format("log10", math_format(10^.x)), 
+                  breaks=c(10^-4, 10^-3, 10^-2, 10^-1, 10^0, 10^1, 10^2), 
+                  limits=c(10^-4, 10^2)) +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank(), legend.position = "none")
+
+ggsave("figures/exp11_16S_primary_PCR_bacterial_load.pdf")
+ggsave("figures/exp11_16S_primary_PCR_bacterial_load.png")
+```
+
+
+## Take subset for Pre-Sm/Pre-Col/Post-Col 
+
+```{r}
+#take subset and make better labels for timepoint
+subset = mouse_undiluted_normalized %>%
+    filter(Timepoint != "T = 1" & Timepoint != "T = 2") %>%
+    mutate(Timepoint_Label = Timepoint) %>%
+    mutate(Timepoint_Label = gsub("Pre-Sm", "Pre-Sm\n(Day -5)", Timepoint_Label)) %>%
+    mutate(Timepoint_Label = gsub("Pre-Col", "Pre-Col\n(Day -4)", Timepoint_Label)) %>%
+    mutate(Timepoint_Label = gsub("T = -2", "Post-Col 1\n(Day -2)", Timepoint_Label)) %>%
+    mutate(Timepoint_Label = gsub("T = 0", "Post-Col 2\n(Day 0)", Timepoint_Label)) %>%
+    mutate(Timepoint_Label = factor(Timepoint_Label, levels=c("Pre-Sm\n(Day -5)", "Pre-Col", "Pre-Col\n(Day -4)", 
+                                                              "T = -2", "Post-Col 1\n(Day -2)", "T = 0", "Post-Col 2\n(Day 0)")))
+```
+
+```{r}
+medians_subset = medians %>%
+    filter(Timepoint != "T = 1" & Timepoint != "T = 2") %>%
+    mutate(Timepoint_Label = Timepoint) %>%
+    mutate(Timepoint_Label = gsub("Pre-Sm", "Pre-Sm\n(Day -5)", Timepoint_Label)) %>%
+    mutate(Timepoint_Label = gsub("Pre-Col", "Pre-Col\n(Day -4)", Timepoint_Label)) %>%
+    mutate(Timepoint_Label = gsub("T = -2", "Post-Col 1\n(Day -2)", Timepoint_Label)) %>%
+    mutate(Timepoint_Label = gsub("T = 0", "Post-Col 2\n(Day 0)", Timepoint_Label))
+```
+
+```{r, fig.width=5, fig.height=5}
+set.seed(111)
+
+ggplot(subset, aes(x=Timepoint_Label, y=RelativeLoadPerGram)) +
+    geom_point(stat="summary", fun.y=median, colour="indianred", shape=95, size=36) +
+    geom_jitter(aes(fill=Timepoint), height=0, width=0.3, shape=21, size=2.5, stroke=0.75) +
+    geom_text(data=medians_subset, colour="indianred", size=4,
+              aes(x=Timepoint_Label, y=10^1.65, label=format(round(MedianLoad, digits=3), nsmall=2))) +
+    scale_fill_manual(values=colourpalette) +
+    scale_x_discrete(name="Timepoint") +
+    scale_y_log10(name = "Relative bacterial load per gram", 
+                  labels = scales::trans_format("log10", math_format(10^.x)), 
+                  breaks=c(10^-3, 10^-2, 10^-1, 10^0, 10^1, 10^2), 
+                  limits=c(10^-3, 10^3)) +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank(), legend.position = "none")
+
+ggsave("figures/exp11_16S_primary_PCR_bacterial_load_subset.png")
+ggsave("figures/exp11_16S_primary_PCR_bacterial_load_subset.pdf")
+```
+
+```{r}
+#calculate ranksum p-values
+Load_PreSm  = subset %>% filter(Timepoint_Label=="Pre-Sm\n(Day -5)") %>% pull(RelativeLoadPerGram)
+Load_PreCol  = subset %>% filter(Timepoint_Label=="Pre-Col\n(Day -4)") %>% pull(RelativeLoadPerGram)
+Load_PostCol1  = subset %>% filter(Timepoint_Label=="Post-Col 1\n(Day -2)") %>% pull(RelativeLoadPerGram)
+Load_PostCol2  = subset %>% filter(Timepoint_Label=="Post-Col 2\n(Day 0)") %>% pull(RelativeLoadPerGram)
+```
+
+```{r}
+wilcox.test(Load_PreCol, Load_PreSm, alternative = "two.sided")
+```
+
+```{r}
+wilcox.test(Load_PostCol1, Load_PreCol, alternative = "two.sided")
+```
+
+
+```{r}
+wilcox.test(Load_PostCol2, Load_PostCol1, alternative = "two.sided")
+```
+
+
+## Log session
+
+```{r}
+sessionInfo()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

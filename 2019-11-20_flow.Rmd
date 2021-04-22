@@ -1,0 +1,599 @@
+---
+title: 'Flow cytometry in vitro: GFP-targeting of E. coli sfgfp in competition with E. coli mcherry - 8h timepoint'
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    df_print: paged
+---
+
+******************************************************* 
+
+Authored: Kathy N. Lam
+
+Experiment: November 20, 2019
+
+Updated: `r format(Sys.Date(), "%B %d, %Y")`
+
+## Set up
+
+<style type="text/css">
+div.main-container {
+  max-width: 100% !important;
+}
+.tocify {
+  max-width: 100% !important;
+}
+.toc-content {
+  padding-left: 0px !important;
+}
+</style>
+
+```{r, message=FALSE, warning=FALSE}
+library(flowCore) #for reading and manipulating flow data
+library(ggcyto) #for using ggplot with flow data
+library(Phenoflow) #for rarefying
+library(flexmix) #to identify peaks in distributions including multimodal
+library(tidyverse) #for general data wrangling and plotting
+```
+
+
+## Read data
+
+```{r}
+(fs = read.flowSet(path="data_fcs"))
+```
+
+```{r}
+colnames(fs) 
+```
+
+```{r}
+flowCore::pData(phenoData(fs))
+```
+
+```{r}
+#read in sample names and merge
+(metadata = read_tsv("metadata.tsv") %>%
+    rename(name=Filename) %>%
+    mutate(sample=paste(Phage, Replicate)) %>%
+    mutate(Replicate_Full = paste("Replicate", Replicate)) %>%
+    mutate(Treatment_Full = gsub("NT", "Non-Targeting", Treatment)) %>%
+    mutate(Treatment_Full = gsub("GFPT", "GFP-Targeting", Treatment_Full)) 
+)
+```
+
+```{r}
+#add columns to phenoData  
+phenoData(fs)$Order = seq(1, length(phenoData(fs)$name))
+phenoData(fs)$Phage = metadata$Phage
+phenoData(fs)$Replicate = metadata$Replicate
+phenoData(fs)$Replicate_Full = metadata$Replicate_Full
+phenoData(fs)$Name = metadata$name
+phenoData(fs)$Treatment = metadata$Treatment
+phenoData(fs)$Treatment_Full = metadata$Treatment_Full
+
+phenoData(fs)$Phage = factor(phenoData(fs)$Phage, levels=unique(phenoData(fs)$Phage))
+phenoData(fs)$Treatment = factor(phenoData(fs)$Treatment, levels=unique(phenoData(fs)$Treatment))
+phenoData(fs)$Treatment_Full = factor(phenoData(fs)$Treatment_Full, levels=unique(phenoData(fs)$Treatment_Full))
+pData(phenoData(fs))
+```
+
+```{r}
+#make labeller function for plot facetting 
+order = as.character(phenoData(fs)$Order)
+name = phenoData(fs)$Name
+
+order_names = mapply(c, order, name, SIMPLIFY = FALSE) #make a one-to-one 
+order_names = lapply(order_names, `[[`, 2) #keep second element of each vector in the list
+order_names = order_names[as.character(sort(as.numeric(names(order_names))))] #numerically sort 
+
+order_labeller = function(variable,value){
+  return(order_names[value])
+}
+```
+
+
+## Gate on scatter
+
+```{r, fig.width=12, fig.height=7}
+
+scatter = rbind(c(0,     25000), 
+                c(0,     160000),
+                c(15000, 160000),
+                c(15000, 25000))
+colnames(scatter)=c("FSC-A", "SSC-A")
+scatter = as.data.frame(scatter)
+
+ggplot() + 
+    geom_point(data=fs, aes(x=`FSC-A`, y=`SSC-A`), shape=16, size=0.75, alpha=0.5) +
+    geom_polygon(data=scatter, aes(x=`FSC-A`, y=`SSC-A`), fill=NA, colour="indianred", size=0.75,  linetype="solid") +     
+    scale_y_continuous(name="SSC-A (Granularity)\n", limits = c(-2e1,3e5)) +
+    scale_x_continuous(name="\nFSC-A (Size)", limit=c(-2e1, 5e4)) +
+    facet_grid(Treatment_Full~Replicate_Full) +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank()) 
+
+```
+
+
+```{r}
+gate_scatter = flowCore::polygonGate(filterId="scatter", `FSC-A` = scatter$`FSC-A`, `SSC-A` = scatter$`SSC-A`) 
+result = flowCore::filter(fs, gate_scatter)
+events = flowCore::Subset(fs, result)
+```
+
+
+## Rarefy
+
+```{r}
+events = Phenoflow::FCS_resample(events, replace = FALSE, rarefy = FALSE, progress = TRUE)
+```
+
+
+## Gate on fluoresence 
+
+```{r, fig.width=12, fig.height=7}
+
+red = rbind(
+    c(-500,   200),
+    c(-500,   4e4),
+    c( 4000,  4e4),
+    c( 1000,  200))
+colnames(red)=c("530/30 Blue B-A", "610/20 YG C-A")
+red = as.data.frame(red)
+
+green = rbind(
+    c(2000,   -500),
+    c(2000,    800),
+    c(300000,  800),
+    c(300000, -500))
+colnames(green)=c("530/30 Blue B-A", "610/20 YG C-A")
+green = as.data.frame(green)
+
+ggplot() + 
+    geom_polygon(data=green, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), fill=NA, colour="green4", size=0.75, linetype="solid") +
+    geom_polygon(data=red, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), fill=NA, colour="red3", size=0.75, linetype="solid") +
+    geom_point(data=events, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=1, alpha=0.2) +
+    theme_linedraw(14) +
+    ggcyto::scale_x_flowJo_biexp(name="GFP intensity", widthBasis=-500, pos=5, neg=0, limits=c(-500,3e5), breaks=c(0,1e3,1e4,1e5)) +
+    ggcyto::scale_y_flowJo_biexp(name="mCherry intensity", widthBasis=-500, pos=5, neg=0, limits=c(-1000,1e5), breaks=c(0,1e3,1e4,1e5)) +
+    theme(panel.grid = element_blank(), 
+          axis.title.x = element_text(colour="green4"), 
+          axis.title.y = element_text(colour="red3")) +
+    facet_grid(Treatment_Full~Replicate_Full) 
+```
+
+```{r}
+gate_green = flowCore::polygonGate(filterId="green", `530/30 Blue B-A` = green$`530/30 Blue B-A`, `610/20 YG C-A` = green$`610/20 YG C-A`)
+result_green = flowCore::filter(events, gate_green)
+events_green = flowCore::Subset(events, result_green)
+```
+
+```{r}
+gate_red = flowCore::polygonGate(filterId="red", `530/30 Blue B-A` = red$`530/30 Blue B-A`, `610/20 YG C-A` = red$`610/20 YG C-A`)
+result_red = flowCore::filter(events, gate_red)
+events_red = flowCore::Subset(events, result_red)
+```
+
+```{r}
+percent_red = toTable(summary(result_red)) %>% 
+    mutate(x = 5e4, y = 3e3, colour="red", order=phenoData(events)$order) %>%
+    rename(name=sample) %>%
+    left_join(metadata, by="name")
+
+percent_green = toTable(summary(result_green)) %>%
+    mutate(x = 5e4, y = 2e3, colour="green", order=phenoData(events)$order) %>%
+    rename(name=sample) %>%
+    left_join(metadata, by="name")
+
+percentage = bind_rows(percent_red, percent_green) %>%
+    group_by(name) %>% 
+    mutate(total_gfp_mcherry = sum(true)) %>%
+    mutate(percent_fluor = round(true/total_gfp_mcherry, 2) * 100) %>%
+    mutate(label = paste0(true, " events (", percent_fluor, "%)")) %>%
+    mutate(label2 = paste(true, "events"))
+    
+```
+
+
+
+```{r, fig.width=12, fig.height=7}
+(ggplot() + 
+    geom_point(data=events, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=1, alpha=0.2, colour="black") +
+    geom_point(data=events_green, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=1.25, alpha=0.2, colour="green4") +
+    geom_point(data=events_red, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=1.25, alpha=0.2, colour="red3") +
+    geom_text(data=percentage, aes(x=x, y=y, label=label, colour=colour), size=3.5, hjust=1) +
+    geom_text(data=percentage, aes(x=3e5, y=3e4, label=paste0(count, " events total")), colour="grey27", size=3.5, hjust=1) +
+    scale_colour_manual(values=c("green4", "red3")) +
+    ggcyto::scale_x_flowJo_biexp(name="GFP intensity", widthBasis=-500, pos=5, neg=0, limits=c(-500,3e5), breaks=c(0,1e3,1e4,1e5)) +
+    ggcyto::scale_y_flowJo_biexp(name="mCherry intensity", widthBasis=-500, pos=5, neg=0, limits=c(-1000,1e5), breaks=c(0,1e3,1e4,1e5)) +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank(), 
+          axis.title.x = element_text(colour="green4"), 
+          axis.title.y = element_text(colour="red3"), 
+          legend.position = "none") +
+   facet_grid(Treatment_Full~Replicate_Full) 
+)
+
+ggsave("figures/GFP_mCherry_8h_scatterplot_replicates.png", width=12, height=6)
+```
+
+
+## Plot intensity distribution for RFP / GFP 
+
+```{r, fig.width=12, fig.height=6}
+
+ggplot(events_green) +
+    geom_bar(stat="bin", aes(x=`530/30 Blue B-A`, y=stat(count)), fill="green4", bins=50, alpha=1, colour="black", size=0.25) +
+    geom_vline(xintercept=3e4, linetype="dashed") +
+    ggcyto::scale_x_flowJo_biexp(name="GFP intensity", widthBasis=-500, pos=5, neg=0, limits=c(1e3,3e5), breaks=c(0,1e3,1e4,1e5)) +
+    scale_y_continuous(name="Count") +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank(), 
+          axis.title.x = element_text(colour="green4"), 
+          legend.position = "none") +
+    facet_grid(Treatment_Full~Replicate_Full) 
+
+ggsave("figures/distributions_GFP.png", width=12, height=6)
+```
+
+```{r, fig.width=12, fig.height=6}
+
+ggplot(events_red) +
+    geom_bar(stat="bin", aes(x=`610/20 YG C-A`, y=stat(count)), fill="red3", bins=50, alpha=1, colour="black", size=0.25) +
+    geom_vline(xintercept=1.15e3, linetype="dashed") +
+    ggcyto::scale_x_flowJo_biexp(name="mCherry intensity", widthBasis=-500, pos=5, neg=0, limits=c(0,1e4), breaks=c(0,1e2,1e3,1e4)) +
+    scale_y_continuous(name="Count") +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank(), 
+          axis.title.x = element_text(colour="red3"), 
+          legend.position = "none") +
+    facet_grid(Treatment_Full~Replicate_Full) 
+
+ggsave("figures/distributions_mCherry.png", width=12, height=6)
+```
+
+## Plot representative replicate
+
+```{r}
+samples=c(1,4)
+events_rep1 = events[samples]
+events_green_rep1 = events_green[samples]
+events_red_rep1 = events_red[samples]
+
+phenoData(events_rep1)$Treatment_Full = factor(phenoData(events_rep1)$Treatment_Full, levels=c("Non-Targeting", "GFP-Targeting"))
+phenoData(events_green_rep1)$Treatment_Full = factor(phenoData(events_green_rep1)$Treatment_Full, levels=c("Non-Targeting", "GFP-Targeting"))
+phenoData(events_red_rep1)$Treatment_Full = factor(phenoData(events_red_rep1)$Treatment_Full, levels=c("Non-Targeting", "GFP-Targeting"))
+
+percentage_rep1 = percentage %>% 
+    dplyr::filter(Replicate == 1) %>%
+    mutate(Treatment_Full = factor(Treatment_Full, levels=c("Non-Targeting", "GFP-Targeting")))
+```
+
+
+```{r, fig.width=12, fig.height=6}
+ggplot() + 
+    geom_point(data=events_rep1, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.75, alpha=0.2, colour="black") +
+    geom_point(data=events_green_rep1, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=1, alpha=0.2, colour="green4") +
+    geom_point(data=events_red_rep1, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=1, alpha=0.2, colour="red3") +
+    geom_text(data=percentage_rep1, aes(x=x, y=y, label=label, colour=colour), size=4, hjust=1) +
+    geom_text(data=percentage_rep1, aes(x=-4e2, y=5e4, label=paste0(count, " events total")), colour="grey27", size=4, hjust=0) +
+    scale_colour_manual(values=c("green4", "red3")) +
+    ggcyto::scale_x_flowJo_biexp(name="GFP intensity", widthBasis=-500, pos=5, neg=0, limits=c(-500,3e5), breaks=c(0,1e3,1e4,1e5)) +
+    ggcyto::scale_y_flowJo_biexp(name="mCherry intensity", widthBasis=-500, pos=5, neg=0, limits=c(-1000,1e5), breaks=c(0,1e3,1e4,1e5)) +
+    theme_linedraw(16) +
+    theme(panel.grid = element_blank(), 
+          axis.title.x = element_text(colour="green4"), 
+          axis.title.y = element_text(colour="red3"), 
+          legend.position = "none", 
+          panel.border = element_rect(size=1.25)) +
+   facet_wrap(~Treatment_Full, scales="free_y")
+
+ggsave("figures/2019-11-20_GFP_mCherry_8h_replicate1_scatterplot.pdf", width=12, height=6)
+ggsave("figures/2019-11-20_GFP_mCherry_8h_replicate1_scatterplot.png", width=12, height=6, dpi=150)
+```
+
+
+```{r}
+events_green_rep1_compatible = events_green_rep1[1:length(events_green_rep1)]
+events_red_rep1_compatible = events_red_rep1[1:length(events_red_rep1)]
+
+colnames(events_green_rep1_compatible) = c("Intensity", "610/20 YG C-A", "FSC-A", "FSC-H", "FSC-W", "SSC-A", "SSC-H", "SSC-W", "Time")
+colnames(events_red_rep1_compatible) = c("530/30 Blue B-A", "Intensity", "FSC-A", "FSC-H", "FSC-W", "SSC-A", "SSC-H", "SSC-W", "Time")
+```
+
+```{r, fig.width=12, fig.height=3.5}
+ggplot() +
+    geom_bar(stat="bin", data=events_red_rep1_compatible, aes(x=`Intensity`, y=stat(count)), fill="red3", bins=50, alpha=0.75, colour="black", size=0.25) +
+    geom_bar(stat="bin", data=events_green_rep1_compatible, aes(x=`Intensity`, y=stat(count)), fill="green4", bins=65, alpha=0.75, colour="black", size=0.25) +
+    ggcyto::scale_x_flowJo_biexp(name="Intensity", widthBasis=-100, pos=5, neg=0, limits=c(1e2,3e5), breaks=c(0,1e3,1e4,1e5)) +
+    scale_y_continuous(name="Scaled Count\n") +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank(),legend.position = "none", 
+          panel.border=element_rect(size=1), 
+          strip.text=element_blank()) +
+    facet_wrap(~Treatment) 
+
+ggsave("figures/2019-11-20_GFP_mCherry_8h_replicate1_distribution.pdf", width=12, height=3.5)
+```
+
+
+## Plot unscaled and scaled distributions
+
+```{r}
+#make df for red and green to be plotted together by extracting values from flowset object
+datacols = as.character(events_green[[1]]@parameters@data[["name"]])
+samplenames = sampleNames(events_green)
+
+df_green = as.data.frame(matrix(nrow=0, ncol=length(datacols)+2))
+df_red = as.data.frame(matrix(nrow=0, ncol=length(datacols)+2)) 
+colnames(df_green) = c("Sample", "Population", datacols)
+colnames(df_red) = c("Sample", "Population", datacols)
+
+#match data types of df_green/red columns to match data_green/red columns for later row binding
+datatypes=as_tibble(events_green[[1]]@exprs) %>%
+    mutate(Sample = "datatype_char") %>%
+    mutate(Population="datatype_char")
+common = names(df_green)[names(df_green) %in% names(datatypes)]
+df_green[common] = lapply(common, function(x) {match.fun(paste0("as.", class(datatypes[[x]])))(df_green[[x]])})
+df_red[common] = lapply(common, function(x) {match.fun(paste0("as.", class(datatypes[[x]])))(df_red[[x]])})
+    
+for (sample in samplenames) {
+    data_green = as.data.frame(events_green[[sample]]@exprs) %>%
+    mutate(Sample = sample) %>%
+    mutate(Population="green")
+    
+    df_green = bind_rows(df_green, data_green)
+    
+    data_red = as.data.frame(events_red[[sample]]@exprs) %>%
+    mutate(Sample = sample) %>%
+    mutate(Population="red")
+
+    df_red = bind_rows(df_red, data_red)
+}
+```
+
+```{r}
+green = df_green %>%
+    select(Sample, Population, `530/30 Blue B-A`) %>%
+    rename(Intensity = `530/30 Blue B-A`)
+
+red = df_red %>%
+    select(Sample, Population, `610/20 YG C-A`) %>%
+    rename(Intensity = `610/20 YG C-A`)
+
+df_intensity = bind_rows(green, red) %>%
+    left_join(metadata, by=c("Sample"="name")) %>%
+    mutate(Treatment=factor(Treatment, levels=c("NT", "GFPT")))
+```
+
+```{r, fig.width=12, fig.height=6}
+
+ggplot(df_intensity) +
+    geom_bar(stat="bin", aes(x=Intensity, y=stat(count), fill=Population), position="identity", bins=50, alpha=0.75, colour="black", size=0.25) +
+    ggcyto::scale_x_flowJo_biexp(name="Intensity", widthBasis=-100, pos=5, neg=0, breaks=c(0,1e3,1e4,1e5)) +
+    scale_y_continuous(name="Count\n") +
+    scale_fill_manual(values=c("green4","red3")) +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank(),legend.position = "none", 
+          panel.border=element_rect(size=1), 
+          strip.text.x = element_blank()) +
+    facet_grid(Replicate_Full~Treatment) 
+
+ggsave("figures/2019-11-20_GFP_mCherry_8h_replicates123_distribution_count.pdf", width=12, height=6)
+```
+
+```{r, fig.width=12, fig.height=6}
+
+ggplot(df_intensity) +
+   geom_bar(stat="bin", aes(x=Intensity, y=stat(ncount), fill=Population), position="identity", bins=50, alpha=0.75, colour="black", size=0.25) +
+    ggcyto::scale_x_flowJo_biexp(name="Intensity", widthBasis=-100, pos=5, neg=0, breaks=c(0,1e3,1e4,1e5)) +
+    scale_y_continuous(name="Scaled Count\n", limits=c(0,1.05)) +
+    scale_fill_manual(values=c("green4","red3")) +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank(),legend.position = "none", 
+          panel.border=element_rect(size=1), 
+          strip.text.x = element_blank()) +
+    facet_grid(Replicate_Full~Treatment) 
+
+ggsave("figures/2019-11-20_GFP_mCherry_8h_replicates123_distribution_scaledcount.pdf", width=12, height=6)
+```
+
+
+## Plot replicate distrubtions combined
+
+```{r, fig.width=12, fig.height=3.5}
+ggplot(df_intensity) +
+    geom_bar(stat="bin", aes(x=Intensity, y=stat(count), fill=Population, group=interaction(Replicate, Population)), 
+             position="identity", bins=50, alpha=0.25, colour="black", size=0.25) +
+    ggcyto::scale_x_flowJo_biexp(name="Intensity", widthBasis=-100, pos=5, neg=0, breaks=c(0,1e3,1e4,1e5)) +
+    scale_y_continuous(name="Count\n") +
+    scale_fill_manual(values=c("green4","red3")) +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank(),legend.position = "none", 
+          panel.border=element_rect(size=1), 
+          strip.text.x = element_blank()) +
+    facet_wrap(~Treatment)
+
+ggsave("figures/2019-11-20_GFP_mCherry_8h_replicates_distribution_overlapping_count.pdf", width=12, height=3.5)
+```
+
+```{r, fig.width=12, fig.height=3.5}
+#try plotting the mean and sd over top of overlapping distributions
+ggplot(df_intensity) +
+    geom_bar(stat="bin", aes(x=Intensity, y=stat(count), fill=Population, group=interaction(Replicate, Population)), 
+             position="identity", bins=50, alpha=0.25, colour="black", size=0.25) +
+    stat_bin(geom="point", aes(x=Intensity, y=stat(count)/3, colour=Population, group=Population), 
+             position="identity", bins=50, alpha=1, size=1) +
+    ggcyto::scale_x_flowJo_biexp(name="Intensity", widthBasis=-100, pos=5, neg=0, breaks=c(0,1e3,1e4,1e5)) +
+    scale_y_continuous(name="Count\n") +
+    scale_fill_manual(values=c("green4","red3")) +
+    scale_colour_manual(values=c("green4","red3")) +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank(),legend.position = "none", 
+          panel.border=element_rect(size=1), 
+          strip.text.x = element_blank()) +
+    facet_wrap(~Treatment)
+```
+
+```{r, fig.width=12, fig.height=3}
+ggplot(df_intensity) +
+    stat_bin(geom="bar", aes(x=Intensity, y=stat(count)/3, fill=Population, group=Population), 
+             position="identity", bins=50, alpha=0.75, size=0.35, colour="black") +
+    geom_line(stat="bin", aes(x=Intensity, y=stat(count), group=interaction(Replicate, Population)), 
+             bins=50, alpha=0.5, colour="black", size=0.15) +
+    geom_jitter(stat="bin", aes(x=Intensity, y=stat(count), fill=Population, group=interaction(Replicate, Population)), 
+             width=0.005, height=0, bins=50, alpha=0.25, shape=21, colour="black", size=1.5, stroke=0.75) +
+    ggcyto::scale_x_flowJo_biexp(name="Intensity", widthBasis=-100, pos=5, neg=0, breaks=c(0,1e3,1e4,1e5)) +
+    scale_y_continuous(name="Count", limits=c(0,1100), breaks=seq(0,1000,200)) +
+    scale_fill_manual(values=c("green4","red3")) +
+    scale_colour_manual(values=c("green4","red3")) +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank(),legend.position = "none", 
+          panel.border=element_rect(size=1), 
+          strip.text.x = element_blank()) +
+    facet_wrap(~Treatment, scales="free_y")
+
+ggsave("figures/2019-11-20_GFP_mCherry_8h_replicates_distribution_mean_count.pdf", width=12, height=3.5)
+```
+
+```{r, fig.width=12, fig.height=3}
+#annotate with median of distributions
+average = df_intensity %>%
+    group_by(Population, Treatment) %>%
+    mutate(median=median(Intensity)) %>%
+    select(Treatment, Population, median) %>%
+    unique() %>%
+    rename(Intensity = median)
+
+numbins=50
+
+ggplot(df_intensity) +
+    stat_bin(geom="bar", aes(x=Intensity, y=stat(count)/3, fill=Population, group=Population), 
+             position="identity", bins=50, alpha=0.75, size=0.35, colour="black") +
+    geom_line(stat="bin", aes(x=Intensity, y=stat(count), group=interaction(Replicate, Population)), 
+             bins=50, alpha=0.5, colour="black", size=0.15) +
+    geom_jitter(stat="bin", aes(x=Intensity, y=stat(count), fill=Population, group=interaction(Replicate, Population)), 
+             width=0.005, height=0, bins=50, alpha=0.25, shape=21, colour="black", size=1.5, stroke=0.75) +
+    geom_text(average, mapping=aes(x=Intensity, y=1125, label=round(Intensity), colour=Population)) +
+    ggcyto::scale_x_flowJo_biexp(name="Intensity", widthBasis=-100, pos=5, neg=0, breaks=c(0,1e3,1e4,1e5)) +
+    scale_y_continuous(name="Count", limits=c(0,1175), breaks=seq(0,1000,200)) +
+    scale_fill_manual(values=c("green4","red3")) +
+    scale_colour_manual(values=c("green4","red3")) +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank(),legend.position = "none", 
+          panel.border=element_rect(size=1), 
+          strip.text.x = element_blank()) +
+    facet_wrap(~Treatment, scales="free_y")
+
+ggsave("figures/2019-11-20_GFP_mCherry_8h_replicates_distribution_mean_count_median_value.pdf", width=12, height=3.5)
+```
+
+```{r, fig.width=12, fig.height=3}
+#find peaks of distributions
+GFPT_green = df_intensity %>%
+    dplyr::filter(Population=="green", Treatment=="GFPT") %>%
+    pull(Intensity)
+
+m1 = flexmix::FLXMRglm(family = "gaussian")
+m2 = flexmix::FLXMRglm(family = "gaussian")
+gfptfit = flexmix(GFPT_green ~ 1, data = as.data.frame(GFPT_green), k = 2, model = list(m1, m2))
+GFPT_green_peak1 = parameters(gfptfit, component=1)[[1]]
+GFPT_green_peak2 = parameters(gfptfit, component=2)[[1]]
+
+NT_green = df_intensity %>%
+    dplyr::filter(Population=="green", Treatment=="NT") %>%
+    pull(Intensity)
+
+m1 = flexmix::FLXMRglm(family = "gaussian")
+ntfit = flexmix(NT_green ~ 1, data = as.data.frame(NT_green), k = 1, model = list(m1))
+NT_green_peak1 = parameters(ntfit, component=1)[[1]]
+
+#create compatible df with peak values
+peaks = tibble(Intensity = c(GFPT_green_peak1[[1]], GFPT_green_peak2[[1]], NT_green_peak1[[1]]), 
+               Treatment = c("GFPT", "GFPT", "NT"), 
+               Population = c("green", "green", "green")) %>%
+    mutate(Treatment = factor(Treatment, levels=c("NT", "GFPT")))
+    
+ggplot(df_intensity) +
+    stat_bin(geom="bar", aes(x=Intensity, y=stat(count)/3, fill=Population, group=Population), 
+             position="identity", bins=50, alpha=0.75, size=0.35, colour="black") +
+    geom_line(stat="bin", aes(x=Intensity, y=stat(count), group=interaction(Replicate, Population)), 
+             bins=50, alpha=0.5, colour="black", size=0.15) +
+    geom_jitter(stat="bin", aes(x=Intensity, y=stat(count), fill=Population, group=interaction(Replicate, Population)), 
+             width=0.005, height=0, bins=50, alpha=0.25, shape=21, colour="black", size=1.5, stroke=0.75) +
+    geom_text(peaks, mapping=aes(x=Intensity*1.75, y=1125, label=round(Intensity), colour=Population), size=4.5) +
+    geom_vline(peaks, mapping=aes(xintercept=Intensity), size=0.5, linetype="dashed") +
+    ggcyto::scale_x_flowJo_biexp(name="Intensity", widthBasis=-100, pos=5, neg=0, breaks=c(0,1e3,1e4,1e5)) +
+    scale_y_continuous(name="Count", limits=c(0,1200), breaks=seq(0,1200,250)) +
+    scale_fill_manual(values=c("green4","red3")) +
+    scale_colour_manual(values=c("green4","red3")) +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank(),legend.position = "none", 
+          panel.border=element_rect(size=1), 
+          strip.text.x = element_blank()) +
+    facet_wrap(~Treatment, scales="free_y")
+
+ggsave("figures/2019-11-20_GFP_mCherry_8h_replicates_distribution_mean_count_multimodal_peaks.pdf", width=12, height=3.5)
+```
+
+```{r, fig.width=12, fig.height=3}
+ggplot(df_intensity) +
+    stat_bin(geom="bar", aes(x=Intensity, y=stat(ncount), fill=Population, group=Population), 
+             position="identity", bins=31, alpha=0.75, size=0.35, colour="black") +
+    geom_line(stat="bin", aes(x=Intensity, y=stat(ncount), group=interaction(Replicate, Population)), 
+             bins=50, alpha=0.5, colour="black", size=0.15) +
+    geom_jitter(stat="bin", aes(x=Intensity, y=stat(ncount), fill=Population, group=interaction(Replicate, Population)), 
+             width=0.005, height=0, bins=50, alpha=0.25, shape=21, colour="black", size=1.5, stroke=0.75) +
+    ggcyto::scale_x_flowJo_biexp(name="Intensity", widthBasis=-100, pos=5, neg=0, breaks=c(0,1e3,1e4,1e5)) +
+    scale_y_continuous(name="Scaled Count") +
+    scale_fill_manual(values=c("green4","red3")) +
+    scale_colour_manual(values=c("green4","red3")) +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank(),legend.position = "none", 
+          panel.border=element_rect(size=1), 
+          strip.text.x = element_blank()) +
+    facet_wrap(~Treatment, scales="free_y")
+
+ggsave("figures/2019-11-20_GFP_mCherry_8h_replicates_distribution_mean_scaledcount.pdf", width=12, height=3.5)
+```
+
+
+## Quantify red / green in NT / GFPT
+
+```{r}
+quantify = percentage %>%
+    mutate(population = gsub("green\\+", "GFP+", population)) %>%
+    mutate(population = gsub("red\\+", "mCherry+", population)) %>%
+    mutate(population = factor(population, levels = c("mCherry+", "GFP+"))) %>%
+    mutate(Treatment = factor(Treatment, levels=c("NT", "GFPT")))
+```
+
+```{r, fig.width=6, fig.height=4.5}
+set.seed(2331)
+
+ggplot(quantify) +
+    geom_bar(stat="summary", aes(x=population, fill=population, y=true/count*100, group=Treatment), 
+             fun.y=mean, width=0.65, colour="black", size=1) +
+    geom_text(stat="summary", aes(x=population, colour=population, y=true/count*100, group=interaction(Treatment), 
+                                  label=paste0(round(..y..),"%")), fun.y=mean, size=5, vjust = -2) +
+    geom_jitter(aes(x=population, y=percent), shape=21, size=5, stroke=1.5, position=position_jitter(width = 0.25, height=0), fill="white") +
+    scale_fill_manual(values=c("red3", "green4")) +
+    scale_colour_manual(values=c("red3", "green4")) +
+    scale_y_continuous(name="Percent positive events", limits=c(0,78), expand=c(0,0)) +
+    scale_x_discrete(name="") +
+    theme_linedraw(18) +
+    theme(strip.text.x = element_blank(), legend.position = "none", 
+          axis.ticks.x = element_blank(), panel.grid=element_blank(), panel.border=element_rect(size=1.5)) +
+    facet_wrap(~Treatment, scales = "free_y")
+
+ggsave("figures/2019-11-20_quantify_green_red_barplots.pdf", width=6, height=5)
+```
+
+
+## Log session 
+
+```{r}
+sessionInfo()
+```

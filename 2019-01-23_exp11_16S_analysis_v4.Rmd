@@ -1,0 +1,674 @@
+---
+title: 'Analysis of mouse exp11 16S rRNA gene sequencing data'
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    df_print: paged
+---
+
+******************************************************* 
+
+Authored: Kathy N. Lam 
+
+Experiment: January 23, 2019
+
+Created: February 16, 2021 
+
+Updated: `r format(Sys.Date(), "%B %d, %Y")`
+
+
+## Experimental design
+
+<br>
+<br>
+<center>
+<img src="sample_info/exp11_timeline_v2.png" width="80%">
+<center>
+<br>
+<br>
+
+## Set up
+
+<style type="text/css">
+div.main-container {
+  max-width: 100% !important;
+}
+.tocify {
+  max-width: 100% !important;
+}
+.toc-content {
+  padding-left: 0px !important;
+}
+body{
+  font-family: Arial;
+  font-size: 12pt;
+}
+</style>
+
+
+```{r, message=FALSE, warning=FALSE}
+library(scales) #for nice axes
+library(phyloseq) #for 16S analyses
+library(qiime2R) #for reading qiime objects into R
+library(cowplot) #for grid plotting
+library(ggpubr) #for grid plotting with common legend
+library(phylosmith) #to reorder samples in phyloseq object
+library(tidyverse) #for routine wrangling and plotting
+```
+
+
+## Read sample sheet and write metadata
+
+```{r}
+sampledata = readr::read_tsv("sample_info/sample_sheet.tsv", trim_ws = TRUE) %>%
+    mutate(Mouse = str_extract(Sample_ID, "M[0-9]+"),
+           Timepoint = gsub("_", "", str_extract(Sample_ID, "_[TP].+")),
+           Control_Neg = str_extract(Sample_ID, "CTRL_NEG.+"), 
+           Control_Std_Human = str_extract(Sample_ID, "CTRL_STD_human.*"), 
+           Control_Std_Zymo = str_extract(Sample_ID, "CTRL_STD_Zymo.*"), 
+           Control_NTC = str_extract(Sample_ID, "NTC")) %>%
+    unite(Specimen, Mouse, Control_Neg, Control_Std_Human, Control_Std_Zymo, Control_NTC, na.rm=TRUE) %>%
+    mutate(Sample_Type = Specimen) %>%
+    mutate(Sample_Type = gsub("CTRL_NEG.*", "CTRL_NEG", Sample_Type)) %>%
+    mutate(Sample_Type = gsub("M[0-9]+", "Mouse", Sample_Type)) %>%
+    mutate(Sample_Type = gsub("CTRL_STD_human.*", "CTRL_Human", Sample_Type)) %>%
+    mutate(Sample_Type = gsub("CTRL_STD_Zymo.*", "CTRL_Zymo", Sample_Type)) %>%
+    mutate(Specimen = gsub("CTRL_STD_human_feces_", "Human ", Specimen)) %>%
+    mutate(Specimen = gsub("CTRL_STD_Zymo_DNA", "Zymo DNA ", Specimen)) %>%
+    mutate(Specimen = gsub("CTRL_STD_Zymo_mixture_", "Zymo Mix ", Specimen)) %>%
+    mutate(Category = gsub("T-2", "Post-Col 1", Timepoint)) %>%
+    mutate(Category = gsub("T0", "Post-Col 2", Category)) %>%
+    mutate(Category = gsub("Pre-Col", "Post-Sm / Pre-Col", Category)) %>%
+    mutate(Category = coalesce(as.character(Category), as.character(Sample_Type))) %>% #fill NA w Sample_Type in Timepoint for ctrls w no Timepoint
+    mutate(Mouse = str_extract(Sample_ID, "M[0-9]+")) %>%
+    mutate(Day = Timepoint) %>%
+    mutate(Day = gsub("Pre-Sm", -5, Day)) %>%
+    mutate(Day = gsub("Post-Sm \\(Pre-Col\\)", -4, Day)) %>%
+    mutate(Day = gsub("Post-Col", -2, Day)) %>%
+    mutate(Day = gsub("T", "", Day)) %>%
+    select(-c(BioSample_Description, Sample_Owner, Organism, Host, Sex, Tissue_Source, Description, X16, X17, X18, X19))
+
+#write sample data file
+readr::write_tsv(sampledata, "sampledata.tsv")
+```
+
+```{r}
+#factor the columns for plotting
+sampledata = sampledata %>%
+    mutate(Sample_Type = factor(Sample_Type, levels=rev(c("Mouse", "CTRL_Human", "CTRL_Zymo", "CTRL_NEG", "NTC")))) %>%
+    mutate(Mouse = factor(Mouse, levels=gtools::mixedsort(unique(Mouse)))) %>%
+    mutate(Category = factor(Category, levels = c("Pre-Sm", "Post-Sm / Pre-Col", "Post-Col 1", "Post-Col 2", "T1", "T2", 
+                                                  "NTC", "CTRL_NEG","CTRL_Zymo","CTRL_Human"))) 
+```
+
+```{r}
+#add column for colours
+colours = sampledata %>%
+    arrange(factor(Category, levels = c("Pre-Sm", "Post-Sm / Pre-Col", "Post-Col 1", "Post-Col 2", "T1", "T2", 
+                                                              "NTC", "CTRL_NEG","CTRL_Zymo","CTRL_Human"))) %>%
+    select(Category) %>%
+    unique() %>%
+    add_column(Colour=c("forestgreen", "darkmagenta", "gold", "coral", "steelblue", "indianred", #mouse samples
+                        "black", "grey60", "grey85", "white")) #controls
+
+sampledata = sampledata %>%
+    left_join(colours, by="Category")
+
+#make new df for colour legend
+colourpalette = colours$Colour
+names(colourpalette) = colours$Category
+```
+
+```{r, fig.width=6, fig.height=2}
+ggplot(colours, aes(x=Category, y=0, fill=Category)) +
+    geom_tile(colour="black", size=1) +
+    scale_y_continuous(name="") +
+    scale_fill_manual(values=colourpalette) +
+    ggtitle("Colour Legend for Category") +
+    theme_linedraw() +
+    theme(panel.grid = element_blank(), panel.border=element_blank(),
+          legend.position = "none", axis.text.y = element_blank(), axis.ticks = element_blank(), 
+          axis.text.x = element_text(angle=45, hjust=1))
+
+ggsave("figures/exp11_colourpalette.png", width=6, height=2)
+ggsave("figures/exp11_colourpalette.pdf", width=6, height=2)
+```
+
+
+## Examine read count
+
+```{r}
+fqtools_results = read_tsv("sample_info/fastq_read_counts.tsv") %>% 
+    mutate(Sample_ID = gsub("data/", "", Filename)) %>%
+    mutate(Sample_ID = gsub("_S[0-9]+.*", "", Sample_ID)) %>%
+    select(-Filename) %>%
+    distinct() #fwd and rev files are duplicates wrt to sample_id/readcount
+
+#add read counts to metadata to have in phyloseq object
+sampledata = sampledata %>% 
+    left_join(fqtools_results, by="Sample_ID") %>%
+    arrange(Sample_Type, Reads) %>%
+    mutate(order = factor(Sample_ID, levels=rev(unique(Sample_ID)))) 
+
+#save the order to set order after creating phyloseq object
+order = sampledata %>%
+    pull(order)
+
+#get max reads for negative samples
+negmax = sampledata %>%
+    filter(Sample_Type=="CTRL_NEG") %>%
+    pull(Reads) %>%
+    max()
+```
+
+
+```{r}
+p1=ggplot(sampledata) +
+    geom_bar(aes(x=order, y=Reads, fill=Sample_Type), stat="identity", width=1, colour="black", size=0.35) +
+    scale_fill_brewer(palette = "Set1") +
+    geom_hline(yintercept = negmax, linetype="dashed", colour="black", size=0.5) +
+    theme_linedraw(12) +
+    scale_y_log10(name="Reads in fastq file", labels=scales::comma, expand=c(0,0), 
+                  breaks=c(10,100,1000,10000,100000,1000000), limits=c(1,1000000)) +
+    scale_x_discrete(name="Sample") +
+    theme(panel.grid.major.x = element_blank(), axis.text.x = element_blank(), axis.ticks=element_blank())
+```
+
+```{r}
+p2=ggplot(sampledata) +
+    geom_bar(aes(x=order, y=Reads, fill=Sample_Type), stat="identity", width=1, colour="black", size=0.35) +
+    scale_fill_brewer(palette = "Set1") +
+    geom_hline(yintercept = negmax, linetype="dashed", colour="black", size=0.5) +
+    theme_linedraw(12) +
+    scale_y_continuous(name="Reads in fastq file", labels=scales::comma, expand=c(0,0)) +
+    scale_x_discrete(name="Sample") +
+    theme(panel.grid.major.x = element_blank(), axis.text.x = element_blank(), axis.ticks=element_blank())
+```
+
+```{r}
+p3=ggplot(sampledata) +
+    geom_bar(aes(x=order, y=Reads, fill=Category), stat="identity", width=1, colour="black", size=0.35) +
+    scale_fill_manual(values=colourpalette, guide = guide_legend(), name = "") +
+    geom_hline(yintercept = negmax, linetype="dashed", colour="black", size=0.5) +
+    theme_linedraw(12) +
+    scale_y_continuous(name="Reads in fastq file", labels=scales::comma, expand=c(0,0)) +
+    scale_x_discrete(name="Sample") +
+    theme(panel.grid.major.x = element_blank(), axis.text.x = element_blank(), axis.ticks=element_blank())
+```
+
+```{r, fig.width=12, fig.height=7}
+pdf(NULL)
+combined=ggpubr::ggarrange(p1, p2, p3, align='v', common.legend = F, nrow=3, legend="right")
+x=dev.off()
+combined
+ggsave("figures/exp11_allsamples_readcounts.png", width=12, height=7)
+ggsave("figures/exp11_allsamples_readcounts.pdf", width=12, height=7)
+```
+
+
+## Read QIIME2 files
+
+```{r}
+svtable = read_qza("pipeline_output/ASV_table.qza")
+svseqs = read_qza("pipeline_output/ASV_sequences.qza")
+tree = read_qza("pipeline_output/ASV_denovotree.qza")
+taxonomy = read_qza("pipeline_output/ASV_q2taxonomy.qza")
+```
+
+```{r}
+taxtable = taxonomy$data %>% as_tibble() %>% separate(Taxon, sep=";", c("Kingdom","Phylum","Class","Order","Family","Genus","Species"))
+```
+
+```{r}
+#check sizes
+nrow(svtable$data) 
+length(svseqs$data)
+nrow(taxonomy$data %>% as_tibble())
+length(tree$data$tip.label)
+nrow(sampledata) 
+```
+
+## Convert to phyloseq object
+
+```{r}
+po = phyloseq(
+  otu_table(svtable$data, taxa_are_rows = T), 
+  phy_tree(tree$data), 
+  tax_table(as.data.frame(taxtable) %>% select(-Confidence) %>% column_to_rownames("Feature.ID") %>% as.matrix()), 
+  sample_data(sampledata %>% as.data.frame() %>% column_to_rownames("Sample_ID"))
+  )
+
+po = phylosmith::set_sample_order(po, order)
+```
+
+
+## Sanity filter chloroplast and mitocondria
+
+```{r}
+ntaxa(po)
+
+po = phyloseq::subset_taxa(po, (Class!="Chloroplast") | is.na(Class))
+ntaxa(po)
+
+po = phyloseq::subset_taxa(po, (Family!="mitochondria") | is.na(Family))
+ntaxa(po)
+```
+
+
+## First pass quality control 
+
+Ordination with all samples
+
+```{r, fig.width=10, fig.height=8}
+pcoa = phyloseq::ordinate(po, method="PCoA", distance="bray")
+
+(plot_ordination(po, pcoa) +
+    geom_point(aes(fill=Category, shape=Sample_Type), size=3, stroke=0.75) +
+    scale_fill_manual(values = colourpalette) +
+    scale_shape_manual(values = c(22, 23, 24, 25, 21), name="Sample Type") +                            
+    theme_linedraw(14) +
+    guides(fill = guide_legend(override.aes=list(shape=21))) + #required due to bug in manually setting shape; https://github.com/tidyverse/ggplot2/issues/2322
+    guides(shape = guide_legend(override.aes=list(size=3))) +
+    theme(panel.grid=element_blank())
+)
+ggsave("figures/exp11_allsamples_ordination.png", width=10, height=8)
+ggsave("figures/exp11_allsamples_ordination.pdf", width=10, height=8)
+```
+
+Juxtapose number of reads to the richness of each sample
+
+```{r}
+sampledata_observedSVs = phyloseq::estimate_richness(po, measures=c("Observed")) %>%
+    rownames_to_column("Sample_ID") %>% #function output has the sample_id as rowname not column
+    mutate(Sample_ID=gsub("\\.", "-", Sample_ID)) %>% #fix dashes that phyloseq converted to periods
+    left_join(sampledata, by="Sample_ID") %>%
+    arrange(Sample_Type, Specimen, Category) 
+```
+
+```{r, fig.width=12, fig.height=3}
+p1=ggplot(sampledata_observedSVs) +
+    geom_bar(aes(x=Sample_ID, y=Reads, fill=Category), stat="identity", width=1, colour="black", size=0.35) +
+    scale_fill_manual(values = colourpalette) +
+    geom_hline(yintercept = negmax, linetype="dashed", colour="black", size=0.25) +
+    theme_linedraw(12) +
+    scale_y_continuous(name="Reads in fastq file\n", labels=scales::comma, expand=c(0,0)) +
+    scale_x_discrete(name="Sample") +
+    theme(panel.grid.major.x = element_blank(), axis.text.x = element_blank(), axis.ticks=element_blank(), legend.title=element_blank(),
+          plot.margin=unit(c(1.5,0.5,0.5,0.5),"cm"))
+```
+
+```{r, fig.width=12, fig.height=3}
+p2=ggplot(sampledata_observedSVs) +
+  geom_bar(aes(x=Sample_ID, y=Observed, fill=Category), stat="identity", width=1, colour="black", size=0.35) +
+  scale_fill_manual(values = colourpalette) +
+  scale_x_discrete(name="Sample") +
+  scale_y_continuous(name="Observed SVs", expand=c(0,0)) +
+  theme_linedraw(12) +
+  theme(panel.grid.major.x = element_blank(), axis.text.x = element_blank(), axis.ticks=element_blank(), legend.title=element_blank(),
+        plot.margin=unit(c(1.5,0.5,0.5,0.5),"cm"))
+```
+
+```{r, fig.width=12, fig.height=6}
+pdf(NULL)
+combined=ggpubr::ggarrange(p1, p2, align='v', common.legend = T, nrow=2, legend="right")
+x=dev.off()
+combined
+ggsave("figures/exp11_allsamples_readcounts_richness.png", width=12, height=6)
+ggsave("figures/exp11_allsamples_readcounts_richness.pdf", width=12, height=6)
+```
+
+
+## Examine the controls
+
+```{r}
+controls = filter(sampledata_observedSVs, Sample_Type != "Mouse") 
+
+#note: prune_samples subsets by sample id list; subset_sample subsets by metadata
+po_controls = phyloseq::prune_samples(controls$Sample_ID, po) 
+
+#do ordination and pull out results for custom plotting
+pcoa = phyloseq::ordinate(po_controls, method="PCoA", distance="bray")
+
+controls = tibble(Sample_ID = rownames(pcoa$vectors), 
+                 Axis1 = pcoa$vectors[,"Axis.1"], 
+                 Axis2 =  pcoa$vectors[,"Axis.2"], 
+                 Relative_EigenValue1 = pcoa$values[,"Relative_eig"][1],
+                 Relative_EigenValue2 = pcoa$values[,"Relative_eig"][2]) %>%
+  left_join(sampledata_observedSVs, by="Sample_ID") %>%
+  mutate(NumSVs_NumReads = paste0(Observed, " (", Reads, ")")) 
+```
+
+```{r, fig.width=8, fig.height=6}
+set.seed(1)
+
+RelativeEig1 = controls$Relative_EigenValue1[1] * 100
+RelativeEig2 = controls$Relative_EigenValue2[1] * 100
+
+#plot points of format: SVs(Reads)
+ggplot(controls, aes(x=Axis1, y=Axis2)) +
+    geom_text(aes(colour=Sample_Type, label=NumSVs_NumReads, fontface = "bold"), 
+              position=position_jitter(height=0.075, width=0.075), size=3) + 
+    scale_x_continuous(name=paste0("\nBray Axis 1  [", round(RelativeEig1), "%]"), limits=c(-0.5, 0.5)) +
+    scale_y_continuous(name=paste0("\nBray Axis 2  [", round(RelativeEig2), "%]")) +
+    scale_colour_brewer(palette = "Dark2") +
+    theme_linedraw(12) +
+    theme(panel.grid=element_blank())
+
+ggsave("figures/exp11_controls_ordination.png", width=8, height=6)
+ggsave("figures/exp11_controls_ordination.png", width=8, height=6)
+```
+
+
+## Compare diversity Pre-Sm / Pre-Col / Post-Col
+
+```{r}
+subset = sampledata_observedSVs %>%
+    arrange(Sample_Type, Specimen, Timepoint) %>%
+    filter(Timepoint != "T1" & Timepoint != "T2" | is.na(Timepoint)==TRUE) %>%
+    filter(Sample_Type == "NTC" | Sample_Type == "Mouse" | Sample_Type == "CTRL_NEG") %>%
+    mutate(Sample_ID=as.character(Sample_ID))
+
+#note: prune_samples subsets by sample id list; subset_sample subsets by metadata
+po_subset = phyloseq::prune_samples(subset$Sample_ID, po)
+
+pcoa = phyloseq::ordinate(po_subset, method="PCoA", distance="bray")
+```
+
+```{r, fig.width=8, fig.height=5.5}
+phyloseq::plot_ordination(po_subset, pcoa) +
+    geom_point(aes(fill=Category), size=3, shape=21, stroke=0.75) +
+    scale_x_continuous(limits=c(-0.5, 0.6)) + 
+    scale_y_continuous(limits=c(-0.4, 0.55)) + 
+    scale_fill_manual(values=colourpalette) +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank(), 
+          panel.border = element_rect(size=1.25),
+          panel.background = element_rect(colour="black", size=1))
+
+ggsave("figures/exp11_PreSm_PreCol_PostCol_ordination.png", width=8, height=5.5)
+ggsave("figures/exp11_PreSm_PreCol_PostCol_ordination.pdf", width=8, height=5.5)
+```
+
+```{r, fig.width=12, fig.height=3}
+#order the mice by the number of observed SVs in the Pre-Sm sample
+mouse_order = subset %>%
+    filter(Timepoint=="Pre-Sm") %>%
+    arrange(desc(Observed)) %>%
+    pull(Mouse)
+
+richness_mice = subset %>%
+    group_by(Timepoint) %>%
+    mutate(order=Specimen) %>%
+    mutate(order=factor(order, levels=mouse_order)) %>%
+    ungroup() %>%
+    filter(Sample_Type == "Mouse") %>%
+    mutate(Timepoint = factor(Timepoint, levels=c("Pre-Sm","Post-Sm / Pre-Col", "T1", "T2")))
+
+ggplot(richness_mice) +
+  geom_bar(aes(x=order, y=Observed, fill=Category), stat="identity", position="dodge", width=0.75, colour="black", size=0.5) +
+  scale_x_discrete(name="Mouse") +
+  scale_y_continuous(name="Observed SVs", expand=c(0,0), limits=c(0,400)) +
+  scale_fill_manual(values = colourpalette) +
+  theme_linedraw(14) +
+  theme(panel.grid = element_blank(), 
+        panel.border = element_rect(size=1.25),
+        axis.text.x = element_text(angle=90, hjust=1),
+        legend.title=element_blank(),
+        panel.background = element_rect(colour="black", size=1))
+
+ggsave("figures/exp11_PreSm_PreCol_PostCol_mice_individual_richness.png", width=12, height=3)
+ggsave("figures/exp11_PreSm_PreCol_PostCol_mice_individual_richness.pdf", width=12, height=3)
+```
+
+```{r, fig.width=7, fig.height=5.5}
+set.seed(11)
+
+ggplot(richness_mice, aes(x=Category, y=Observed, group=Category, colour=Category, fill=Category)) +
+  geom_bar(stat="summary", fun=median, position="dodge", width=0.65, colour="black", size=0.65) +
+  geom_text(stat="summary", fun=median, aes(label=round(..y..), vjust = -8), show.legend=FALSE, size=4, colour="black") +        
+  geom_jitter(shape=21, width=0.2, height=15, size=2.5, fill="white", stroke=1, colour="black") +
+  scale_fill_manual(values = colourpalette) +
+  scale_colour_manual(values = colourpalette) +
+  scale_x_discrete(name="Timepoint") +
+  scale_y_continuous(name="Observed SVs", expand=c(0,0), limits=c(0,525)) +
+  theme_linedraw(14) +
+  theme(panel.grid = element_blank(),
+        axis.text.x = element_text(angle=45, hjust=1),
+        legend.title = element_blank(), 
+        panel.background = element_rect(colour="black", size=1))
+
+ggsave("figures/exp11_PreSm_PreCol_PostCol_mice_grouped_richness.png", width=7, height=5.5)
+ggsave("figures/exp11_PreSm_PreCol_PostCol_mice_grouped_richness.pdf", width=7, height=5.5)
+```
+
+```{r}
+#calculate ranksum p-values
+SV_PreSm  = richness_mice %>% filter(Category=="Pre-Sm") %>% pull(Observed)
+SV_PreCol  = richness_mice %>% filter(Category=="Post-Sm / Pre-Col") %>% pull(Observed)
+SV_PostCol1  = richness_mice %>% filter(Category=="Post-Col 1") %>% pull(Observed)
+SV_PostCol2  = richness_mice %>% filter(Category=="Post-Col 2") %>% pull(Observed)
+```
+
+```{r}
+wilcox.test(SV_PreCol, SV_PreSm, alternative = "two.sided")
+```
+
+```{r}
+wilcox.test(SV_PostCol1, SV_PreCol, alternative = "two.sided")
+```
+
+```{r}
+wilcox.test(SV_PostCol2, SV_PostCol1, alternative = "two.sided")
+```
+
+
+## Explore classifications esp. Escherichia
+
+```{r, fig.width=12, fig.height=6}
+df = po_subset %>%
+    phyloseq::psmelt() %>%
+    filter(Sample_Type == "Mouse") %>%
+    select(Category, Phylum, Genus, OTU, Abundance) %>%
+    group_by(Category, OTU) %>%
+    mutate(TotalAbundance=sum(Abundance)) %>% #calculate total; default plots each sample separately
+    ungroup() %>%
+    select(-Abundance) %>%
+    unique() %>%
+    filter(TotalAbundance > 0) %>%
+    arrange(Category, Phylum, desc(TotalAbundance)) %>%
+    mutate(PhylumLabel=gsub("p__", "", Phylum))
+
+ggplot(df, aes(x=PhylumLabel, y=TotalAbundance, fill=PhylumLabel)) +
+    geom_bar(stat="identity", position="stack", colour="black") +
+    scale_x_discrete(name="Phylum") +
+    facet_wrap(~Category, nrow=1) +
+    theme_linedraw(14) +
+    theme(axis.text.x = element_text(angle=45, hjust=1), panel.grid=element_blank(), legend.position = "none") 
+```
+
+```{r, fig.width=12, fig.height=6}
+df_subset = po_subset %>%
+    phyloseq::psmelt() %>%
+    filter(Sample_Type == "Mouse") %>%
+    group_by(Sample) %>%
+    mutate(Proportion = Abundance / sum(Abundance, na.rm = TRUE)) %>%
+    filter(Proportion > 0) %>%
+    ungroup() %>%
+    arrange(Sample, desc(Proportion)) %>%
+    mutate(MouseLabel=gsub("M", "", Mouse)) %>%
+    mutate(MouseLabel=factor(MouseLabel, levels=gtools::mixedsort(unique(MouseLabel)))) %>%
+    mutate(PhylumLabel=gsub("p__", "", Phylum)) %>%
+    mutate(PhylumLabel=factor(MouseLabel, levels=gtools::mixedsort(unique(PhylumLabel)))) 
+    
+    
+ggplot(df_subset, aes(x=MouseLabel, y=Proportion, fill=case_when(Genus==" g__Escherichia-Shigella"~ "indianred", 
+                                                            Genus!=" g__Escherichia-Shigella"~ "grey100",
+                                                            is.na(Genus)==TRUE ~"grey100"))) +
+    geom_bar(stat="identity", position="stack", colour="black") +
+    scale_x_discrete(name="Mouse") +
+    scale_y_continuous(expand=c(0,0), breaks=seq(0,1,0.1)) +
+    scale_fill_identity() +
+    facet_wrap(~Category, nrow=1) +
+    theme_linedraw(14) +
+    theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5, size=9), panel.grid=element_blank(), 
+          strip.background=element_rect(fill="white"), strip.text=element_text(colour="black", face="bold"))
+```
+
+
+## Check sequences classified Escherichia
+
+```{r}
+#get the unique ids
+(ec_ids = po_subset %>%
+    phyloseq::psmelt() %>%
+    filter(Genus==" g__Escherichia-Shigella") %>%
+    pull(OTU) %>%
+    unique()
+)
+```
+
+```{r}
+#get confidence info from taxtable
+ec = taxtable %>%
+    filter(Feature.ID %in% ec_ids) 
+```
+
+```{r}
+#sequences from svseq object can be accessed using sv id
+svseqs[["data"]][["d46e2205f0c6ecf67b51f83d111c509c"]]
+```
+
+```{r}
+#colelct sequences and add 
+ec_seqs = tibble(Feature.ID = character(), 
+                 Sequence = character())
+
+for (i in seq(1,length(ec$Feature.ID))){
+    id = ec$Feature.ID[i]
+    seq = as.character(svseqs[["data"]][[ec$Feature.ID[i]]])
+    ec_seqs = add_row(ec_seqs, Feature.ID=id, Sequence=seq)
+}
+
+(ec = ec %>%
+    left_join(ec_seqs, by="Feature.ID"))
+```
+
+```{r}
+#write seqs to fasta file for manual checks
+lines = ""
+for (i in seq(1, nrow(ec))){
+    id=ec$Feature.ID[i]
+    seq=ec$Sequence[i]
+    line=paste0(">", id, "\n", seq)
+    lines=c(lines, line)
+}
+
+fasta = file("escherichia_sequences.fasta")
+writeLines(lines, fasta)
+close(fasta)
+```
+
+
+## Plot fraction Escherichia 
+
+```{r}
+#get median SVs for each category to annotate
+(number_sv = df_subset %>%
+   group_by(Mouse, Category) %>%
+   summarise(SVs=n()) %>%
+   group_by(Category) %>%
+   summarise(MedianSVs=median(SVs)) #note decimals because n=24 is even
+)
+```
+
+
+```{r}
+#calculate median fraction escherichia for each category to annotate
+(proportion_ec = df_subset %>%
+    filter(Genus== " g__Escherichia-Shigella") %>%
+    group_by(Mouse, Category) %>%
+    filter(Proportion==max(Proportion)) %>% #keep only highest SV for each mouse at a timepoint
+    ungroup() %>%
+    select(Category, Mouse, Proportion) %>% 
+    group_by(Category) %>%
+    summarize(Median = median(Proportion), Min=min(Proportion), Max=max(Proportion))
+)
+```
+
+```{r}
+#order mice by proportion of escherichia at timepoint
+ec_order = df_subset %>%
+    filter(Genus==" g__Escherichia-Shigella") %>%
+    filter(Category=="Post-Col 2") %>%
+    group_by(Mouse) %>%
+    filter(Proportion==max(Proportion)) %>% #keep only highest SV for each mouse at a timepoint
+    ungroup() %>%
+    arrange(Proportion) %>%
+    pull(MouseLabel) 
+
+df_subset = df_subset %>%
+  mutate(MouseLabel=factor(MouseLabel, levels=ec_order))
+```
+
+
+```{r, fig.width=12, fig.height=6}
+#colour escherichia in red
+ggplot() +
+    geom_bar(data=df_subset, aes(x=MouseLabel, y=Proportion, fill=case_when(Genus==" g__Escherichia-Shigella"~"indianred", 
+                                                                       Genus!=" g__Escherichia-Shigella"~"grey100", 
+                                                                       is.na(Genus)==TRUE~"grey100")), 
+             stat="identity", position="stack", colour="black") +
+    geom_text(data=number_sv, size=3, colour="black", hjust=1,
+              aes(y=1.07, x=22, label=paste("Median Number SVs:       ", round(MedianSVs,0)))) +
+    geom_text(data=proportion_ec, size=3, colour="indianred", hjust=1,
+              aes(y=1.04, x=22, label=paste("Median Proportion Escherichia:  ", format(round(Median,3), nsmall=3)))) +
+    scale_x_discrete(name="Mouse") +
+    scale_y_continuous(expand=c(0,0), breaks=seq(0,1,0.1), limits=c(0,1.1)) +
+    scale_fill_identity() +
+    facet_wrap(~Category, nrow=1) +
+    theme_linedraw(14) +
+    theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5, size=9), panel.grid=element_blank())
+
+ggsave("figures/exp11_PreSm_PreCol_PostCol_proportion_escherichia_mice_individual.png", width=12, height=6)
+ggsave("figures/exp11_PreSm_PreCol_PostCol_proportion_escherichia_mice_individual.pdf", width=12, height=6)
+```
+
+```{r, fig.width=14.5, fig.height=6}
+#also plot colouring by phylum
+df_subset %>%
+    filter(is.na(Phylum) != TRUE) %>%
+    mutate(PhylumLabel=gsub(" p__", "", Phylum)) %>%
+    mutate(PhylumLabel=factor(PhylumLabel, levels=c("Firmicutes",
+                                                    "Bacteroidota",
+                                                    "Deferribacterota",
+                                                    "Actinobacteriota",
+                                                    "Cyanobacteria",
+                                                    "Patescibacteria",
+                                                    "Verrucomicrobiota",
+                                                    "Proteobacteria"))) %>%
+ggplot() +
+    geom_bar(aes(x=MouseLabel, y=Proportion, fill=PhylumLabel), 
+             stat="identity", position="stack", colour="black", alpha=.85) +
+    geom_text(data=number_sv, size=3, colour="black", hjust=1,
+              aes(y=1.07, x=22, label=paste("Median Number SVs:       ", round(MedianSVs,0)))) +
+    geom_text(data=proportion_ec, size=3, colour="indianred", hjust=1, fontface="bold",
+              aes(y=1.04, x=22, label=paste("Median Proportion Escherichia:  ", format(round(Median,3), nsmall=3)))) +
+    scale_x_discrete(name="Mouse") +
+    scale_y_continuous(name="SV Proportion", expand=c(0,0), breaks=seq(0,1,0.1), limits=c(0,1.1)) +
+    scale_fill_manual(name="Phylum", values=c("steelblue","yellow","hotpink","paleturquoise",
+                                              "chartreuse","orange","forestgreen","indianred")) +
+    facet_wrap(~Category, nrow=1) +
+    theme_linedraw(14) +
+    theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5, size=9), panel.grid=element_blank())
+
+ggsave("figures/exp11_PreSm_PreCol_PostCol_proportion_phyla_mice_individual.png", width=14.5, height=6)
+ggsave("figures/exp11_PreSm_PreCol_PostCol_proportion_phyla_mice_individual.pdf", width=14.5, height=6)
+```
+
+
+## Log session 
+
+```{r}
+sessionInfo()
+```

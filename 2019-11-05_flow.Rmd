@@ -1,0 +1,237 @@
+---
+title: 'Flow cytometry in vitro: GFP-targeting of E. coli sfgfp in competition with E. coli mcherry - 8h vs 24h'
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    df_print: paged
+---
+
+******************************************************* 
+
+Authored: Kathy N. Lam
+
+Experiment: November 5, 2019
+
+Updated: `r format(Sys.Date(), "%B %d, %Y")`
+
+
+## Set up
+
+<style type="text/css">
+div.main-container {
+  max-width: 100% !important;
+}
+.tocify {
+  max-width: 100% !important;
+}
+.toc-content {
+  padding-left: 0px !important;
+}
+</style>
+
+```{r, message=FALSE, warning=FALSE}
+library(flowCore) #for reading and manipulating flow data
+library(Phenoflow) #for rarefying
+library(ggcyto) #for using ggplot with flow data
+library(tidyverse) #for general data wrangling and plotting
+```
+
+
+## Read data
+
+```{r}
+(fs = flowCore::read.flowSet(path="data_fcs"))
+```
+
+```{r}
+colnames(fs) 
+```
+
+```{r}
+flowCore::pData(phenoData(fs))
+```
+
+```{r}
+#read in sample names and merge
+(metadata = read_tsv("metadata.tsv") %>%
+    rename(name=Filename)
+)
+```
+
+```{r}
+#add columns to phenoData  
+phenoData(fs)$Order = seq(1, length(phenoData(fs)$name))
+phenoData(fs)$Phage = metadata$Phage
+phenoData(fs)$Name = metadata$name
+phenoData(fs)$Treatment = metadata$Treatment
+phenoData(fs)$Timepoint = metadata$Timepoint
+phenoData(fs)$Vector = metadata$Vector
+
+phenoData(fs)$Treatment = factor(phenoData(fs)$Treatment, levels=unique(phenoData(fs)$Treatment))
+phenoData(fs)$Timepoint = factor(phenoData(fs)$Timepoint, levels=c("8 h", "24 h"))
+phenoData(fs)$Phage = factor(phenoData(fs)$Phage, levels=c("M13(pCas9 NT f1A)","M13(pCas9 NT f1B)", "M13(pCas9 GFPT f1A)","M13(pCas9 GFPT f1B)"))
+pData(phenoData(fs))
+```
+
+```{r}
+#make labeller function for plot facetting 
+order = as.character(phenoData(fs)$Order)
+name = phenoData(fs)$Name
+
+order_names = mapply(c, order, name, SIMPLIFY = FALSE) #make a one-to-one 
+order_names = lapply(order_names, `[[`, 2) #keep second element of each vector in the list
+order_names = order_names[as.character(sort(as.numeric(names(order_names))))] #numerically sort 
+
+order_labeller = function(variable,value){
+  return(order_names[value])
+}
+```
+
+
+## Gate on scatter
+
+```{r, fig.width=12, fig.height=6}
+
+scatter = rbind(c(0,     30000), 
+                c(0,     150000),
+                c(20000, 150000),
+                c(20000, 30000))
+colnames(scatter)=c("FSC-A", "SSC-A")
+scatter = as.data.frame(scatter)
+
+(ggplot() + 
+    geom_point(data=fs, aes(x=`FSC-A`, y=`SSC-A`), shape=16, size=0.5, alpha=0.5) +
+    geom_polygon(data=scatter, aes(x=`FSC-A`, y=`SSC-A`), fill=NA, colour="indianred", size=0.5,  linetype="solid") + 
+    scale_y_continuous(name="SSC-A (Granularity)", limits = c(-1e1,2e5)) +
+    scale_x_continuous(name="FSC-A (Size)", limit=c(-1e1, 6e4)) +
+    facet_grid(Timepoint~Phage) +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank())
+)
+```
+
+
+```{r}
+gate_scatter = flowCore::polygonGate(filterId="scatter", `FSC-A` = scatter$`FSC-A`, `SSC-A` = scatter$`SSC-A`) 
+result = flowCore::filter(fs, gate_scatter)
+events = flowCore::Subset(fs, result)
+```
+
+
+## Rarefy
+
+```{r}
+events = Phenoflow::FCS_resample(events, replace = FALSE, rarefy = FALSE, progress = TRUE)
+```
+
+
+## Gate on fluoresence 
+
+```{r, fig.width=12, fig.height=6}
+
+red = rbind(
+    c(-500,   900),
+    c(-500,   2e5),
+    c( 4000,  2e5),
+    c( 1000,  900))
+colnames(red)=c("530/30 Blue B-A", "610/20 YG C-A")
+red = as.data.frame(red)
+
+green = rbind(
+    c(1000,   -1000),
+    c(1000,    800),
+    c(300000,  800),
+    c(300000, -1000))
+colnames(green)=c("530/30 Blue B-A", "610/20 YG C-A")
+green = as.data.frame(green)
+
+ggplot() + 
+    geom_polygon(data=green, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), fill=NA, colour="green4", size=0.5, linetype="solid") +
+    geom_polygon(data=red, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), fill=NA, colour="red3", size=0.5, linetype="solid") +
+    geom_point(data=events, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.25) +
+    theme_linedraw(14) +
+    ggcyto::scale_x_flowJo_biexp(name="GFP intensity", widthBasis=-10, pos=4.25, neg=0, limits=c(-500,5e5), breaks=c(0,1e3,1e4,1e5)) +
+    ggcyto::scale_y_flowJo_biexp(name="mCherry intensity", widthBasis=-10, pos=3.75, neg=0, limits=c(-1000,5e5), breaks=c(0,1e3,1e4,1e5)) +
+    theme(panel.grid = element_blank(), 
+          axis.title.x = element_text(colour="green4"), 
+          axis.title.y = element_text(colour="red3")) +
+    facet_grid(Timepoint~Phage)  
+```
+
+```{r}
+gate_green = flowCore::polygonGate(filterId="green", `530/30 Blue B-A` = green$`530/30 Blue B-A`, `610/20 YG C-A` = green$`610/20 YG C-A`)
+result_green = flowCore::filter(events, gate_green)
+events_green = flowCore::Subset(events, result_green)
+```
+
+```{r}
+gate_red = flowCore::polygonGate(filterId="red", `530/30 Blue B-A` = red$`530/30 Blue B-A`, `610/20 YG C-A` = red$`610/20 YG C-A`)
+result_red = flowCore::filter(events, gate_red)
+events_red = flowCore::Subset(events, result_red)
+```
+
+```{r}
+percent_red = toTable(summary(result_red)) %>% 
+    mutate(x = 3e5, y = 7e3, colour="red", order=phenoData(events)$order) %>%
+    rename(name=sample) %>%
+    left_join(metadata, by="name")
+
+percent_green = toTable(summary(result_green)) %>%
+    mutate(x = 3e5, y = 3e3, colour="green", order=phenoData(events)$order) %>%
+    rename(name=sample) %>%
+    left_join(metadata, by="name")
+
+percentage = bind_rows(percent_red, percent_green) %>%
+    group_by(name) %>% 
+    mutate(total_gfp_mcherry = sum(true)) %>%
+    mutate(fraction_fluor = round(true/total_gfp_mcherry, 2)) %>%
+    mutate(label = paste0(true, " (", fraction_fluor*100, "%)"))
+    
+```
+
+
+
+```{r, fig.width=12, fig.height=6}
+percentage = percentage %>%
+    mutate(Timepoint=factor(Timepoint, levels=c("8 h", "24 h"))) %>%
+    mutate(Phage=factor(Phage, levels=c("M13(pCas9 NT f1B)", "M13(pCas9 NT f1A)", "M13(pCas9 GFPT f1A)", "M13(pCas9 GFPT f1B)")))
+
+ggplot() + 
+    geom_point(data=events, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="black") +
+    geom_point(data=events_green, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="green4") +
+    geom_point(data=events_red, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="red3") +
+    geom_text(data=percentage, aes(x=x, y=y, label=label, colour=colour), size=4, hjust=1) +
+    geom_text(data=percentage, aes(x=3e5, y=3.5e5, label=paste0(count, " events total")), colour="grey27", size=4, hjust=1) +
+    scale_colour_manual(values=c("green4", "red3")) +
+    theme_linedraw(14) +
+    ggcyto::scale_x_flowJo_biexp(name="GFP intensity", widthBasis=-10, pos=4.25, neg=0, limits=c(-400,5e5), breaks=c(0,1e3,1e4,1e5)) +
+    ggcyto::scale_y_flowJo_biexp(name="mCherry intensity", widthBasis=-10, pos=3.75, neg=0, limits=c(-1000,5e5), breaks=c(0,1e3,1e4,1e5)) +
+    theme(panel.grid = element_blank(), panel.border = element_rect(size=1),
+          axis.title.x = element_text(colour="green4"), 
+          axis.title.y = element_text(colour="red3"), 
+          legend.position = "none") +
+    facet_grid(Timepoint~Phage) 
+
+ggsave("figures/scatterplot_GFP_mCherry_8h_24h.png", width=12, height=6)
+```
+
+
+## Log session info
+
+```{r}
+sessionInfo()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+

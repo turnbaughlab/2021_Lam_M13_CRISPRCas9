@@ -1,0 +1,497 @@
+---
+title: 'Flow cytometry for mouse exp19: GFP-targeting of E. coli sfgfp mcherry'
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    df_print: paged
+---
+
+******************************************************* 
+
+Authored: Kathy N. Lam 
+
+Experiment: March 8, 2020
+
+Updated: `r format(Sys.Date(), "%B %d, %Y")`
+
+
+## Set up
+
+<style type="text/css">
+div.main-container {
+  max-width: 100% !important;
+}
+.tocify {
+  max-width: 100% !important;
+}
+.toc-content {
+  padding-left: 0px !important;
+}
+</style>
+
+```{r, message=FALSE, warning=FALSE}
+library(flowCore) #for reading and manipulating flow data
+library(ggcyto) #for using ggplot with flow data
+library(scales) #for nice plot axes
+library(cowplot) #for multi panel plots
+library(Phenoflow) #for rarefying
+library(tidyverse) #for data wrangling and plotting
+```
+
+
+## Read data
+
+```{r}
+(fs = read.flowSet(path="data_fcs"))
+```
+
+```{r}
+colnames(fs) 
+```
+
+```{r}
+pData(phenoData(fs))
+```
+
+```{r}
+#read in sample names and merge
+metadata = read_tsv("metadata.tsv") %>%
+    rename(name=Filename) %>%
+    mutate(Mouse = paste("Mouse", Mouse)) %>%
+    mutate(Day = paste("Day", Timepoint)) %>%
+    mutate(Treatment_Mouse = paste0(Treatment, "\n", Mouse)) %>%
+    mutate(Mouse_Treatment = paste0(Mouse, " (", Treatment, ")"))
+
+metadata$Mouse = factor(metadata$Mouse, levels= unique(metadata$Mouse))
+metadata$Treatment_Mouse = factor(metadata$Treatment_Mouse, levels=unique(metadata$Treatment_Mouse))
+metadata$Mouse_Treatment = factor(metadata$Mouse_Treatment, levels=unique(metadata$Mouse_Treatment))
+metadata$Treatment = factor(metadata$Treatment, levels=unique(metadata$Treatment))
+metadata$Day = factor(metadata$Day, levels=unique(metadata$Day))
+metadata
+```
+
+```{r}
+#add columns to phenoData  
+phenoData(fs)$Order = seq(1, length(phenoData(fs)$name))
+phenoData(fs)$Treatment = metadata$Treatment
+phenoData(fs)$Timepoint = metadata$Timepoint
+phenoData(fs)$Day = metadata$Day
+phenoData(fs)$Name = metadata$name
+phenoData(fs)$Mouse = metadata$Mouse
+phenoData(fs)$Treatment_Mouse = metadata$Treatment_Mouse
+phenoData(fs)$Mouse_Treatment = metadata$Mouse_Treatment
+pData(phenoData(fs))
+```
+
+```{r}
+#make labeller function for facet_wrap
+order = as.character(phenoData(fs)$Order)
+name = phenoData(fs)$Name
+
+order_names = mapply(c, order, name, SIMPLIFY = FALSE) #make a one-to-one 
+order_names = lapply(order_names, `[[`, 2) #keep second element of each vector in the list
+order_names = order_names[as.character(sort(as.numeric(names(order_names))))] #numerically sort 
+
+order_labeller = function(variable,value){
+  return(order_names[value])
+}
+```
+
+
+## Gate on scatter
+
+```{r, fig.width=12, fig.height=40}
+
+scatter = rbind(c(0,   1e4), 
+                c(1e5, 1e4),
+                c(1e5, 2.5e5),  
+                c(0,   2.5e5))
+colnames(scatter)=c("FSC-A", "SSC-A")
+scatter = as.data.frame(scatter)
+
+ggplot() + 
+    geom_point(data=fs, aes(x=`FSC-A`, y=`SSC-A`), shape=16, size=0.75, alpha=0.5) +
+    scale_y_continuous(name="SSC-A (Granularity)\n", limits = c(-2e1,3e5)) +
+    scale_x_continuous(name="\nFSC-A (Size)", limit=c(-2e1,3e5)) +
+    facet_grid(Mouse~Timepoint) +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank(), axis.text.x=element_text(angle=90,hjust=1)) +
+    geom_polygon(data=scatter, aes(x=`FSC-A`, y=`SSC-A`), fill=NA, colour="indianred", size=0.5,  linetype="solid") 
+```
+
+<br>
+
+```{r}
+gate_scatter = polygonGate(filterId="scatter", `FSC-A` = scatter$`FSC-A`, `SSC-A` = scatter$`SSC-A`) 
+result = flowCore::filter(fs, gate_scatter)
+events = flowCore::Subset(fs, result)
+```
+
+
+## Rarefy
+
+```{r}
+events = Phenoflow::FCS_resample(events, replace = FALSE, rarefy = FALSE, progress = TRUE)
+```
+
+
+## Gate on fluorescence 
+
+```{r, fig.width=5, fig.height=5}
+
+red = rbind(
+    c(-1e3,   4e3),
+    c(-1e3,   4e5),
+    c( 4000,  4e5),
+    c( 1000,  4e3))
+colnames(red)=c("530/30 Blue B-A", "610/20 YG C-A")
+red = as.data.frame(red)
+
+yellow = rbind(
+    c(3e3,  3e3),
+    c(9e2,  2e3),
+    c(5e3,  4e5),
+    c(1e5,  4e5),
+    c(1e5,  4e4))
+colnames(yellow)=c("530/30 Blue B-A", "610/20 YG C-A")
+yellow = as.data.frame(yellow)
+
+#check polygons 
+ggplot() + 
+    geom_polygon(data=yellow, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), fill=NA, colour="goldenrod4", size=0.5, linetype="solid") +
+    geom_polygon(data=red, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), fill=NA, colour="red3", size=0.5, linetype="solid") +
+    theme_linedraw(12) +
+    ggcyto::scale_y_flowJo_biexp(name="mCherry intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1e3, 5.5e5)) +
+    ggcyto::scale_x_flowJo_biexp(name="GFP intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1e3, 3e5)) +
+    theme(panel.grid = element_blank(), 
+          axis.title.x = element_text(colour="green4"), 
+          axis.title.y = element_text(colour="red3")) 
+```
+
+
+```{r, fig.width=12, fig.height=40}
+ggplot() + 
+    geom_polygon(data=yellow, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), fill=NA, colour="gold4", size=0.5, linetype="solid") +
+    geom_polygon(data=red, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), fill=NA, colour="red3", size=0.5, linetype="solid") +
+    geom_point(data=events, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2) +
+    theme_linedraw(12) +
+    ggcyto::scale_y_flowJo_biexp(name="mCherry intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1.5e3, 6e5)) +
+    ggcyto::scale_x_flowJo_biexp(name="GFP intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1.5e3, 4e5)) +
+    theme(panel.grid = element_blank(), 
+          axis.title.x = element_text(colour="green4"), 
+          axis.title.y = element_text(colour="red3")) +
+    facet_grid(Mouse~Timepoint)  
+```
+
+```{r}
+gate_yellow = polygonGate(filterId="yellow", `530/30 Blue B-A` = yellow$`530/30 Blue B-A`, `610/20 YG C-A` = yellow$`610/20 YG C-A`)
+result_yellow = flowCore::filter(events, gate_yellow)
+events_yellow = Subset(events, result_yellow)
+```
+
+```{r}
+gate_red = polygonGate(filterId="red", `530/30 Blue B-A` = red$`530/30 Blue B-A`, `610/20 YG C-A` = red$`610/20 YG C-A`)
+result_red = flowCore::filter(events, gate_red)
+events_red = Subset(events, result_red)
+```
+
+```{r}
+percent_red = toTable(summary(result_red)) %>% 
+    mutate(x = 6e5, y = 0, colour="red", order=phenoData(events)$order) %>%
+    rename(name=sample) %>%
+    left_join(metadata, by="name")
+
+percent_yellow = toTable(summary(result_yellow)) %>%
+    mutate(x = 6e5, y = -5e2, colour="yellow", order=phenoData(events)$order) %>%
+    rename(name=sample) %>%
+    left_join(metadata, by="name")
+
+percentage = bind_rows(percent_red, percent_yellow) %>%
+    group_by(name) %>% 
+    mutate(total_yellow_mcherry = sum(true)) %>%
+    mutate(fraction_fluor = round(true/total_yellow_mcherry, 3)) %>%
+    mutate(percent_fluor = fraction_fluor*100) %>%
+    mutate(label = paste(true, "events"))
+    
+```
+
+```{r, fig.width=12, fig.height=40}
+ggplot() + 
+    geom_point(data=events, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="black") +
+    geom_point(data=events_yellow, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="goldenrod") +
+    geom_point(data=events_red, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="red3") +
+    geom_text(data=percentage, aes(x=x, y=y, label=label, colour=colour), size=3, hjust=1) +
+    geom_text(data=percentage, aes(x=6e5, y=3e5, label=paste0(count, " events total")), colour="grey27", size=3, hjust=1) +
+    scale_colour_manual(values=c("red3", "goldenrod4")) +
+    ggcyto::scale_y_flowJo_biexp(name="mCherry intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1.5e3, 5e5)) +
+    ggcyto::scale_x_flowJo_biexp(name="GFP intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1.5e3, 7e5)) +
+    theme_linedraw(12) +
+    theme(panel.grid = element_blank(), 
+          legend.position = "none") +
+    facet_grid(Mouse_Treatment~Day) 
+
+ggsave("figures/exp19_yellow_red_scatterplot.png", width=12, height=40, dpi=150)
+```
+
+
+## Make plots split on NT / GFPT
+
+```{r, fig.width=12, fig.height=20}
+samples = metadata %>%
+    filter(Treatment == "NT") %>%
+    pull(FlowSampleNumber)
+
+percentage_samples = percentage %>%
+    filter(FlowSampleNumber %in% samples)
+
+ggplot() + 
+    geom_point(data=events[samples], aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="black") +
+    geom_point(data=events_yellow[samples], aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="goldenrod") +
+    geom_point(data=events_red[samples], aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="red3") +
+    geom_text(data=percentage_samples, aes(x=x, y=y, label=label, colour=colour), size=3, hjust=1) +
+    geom_text(data=percentage_samples, aes(x=6e5, y=3e5, label=paste0(count, " events total")), colour="grey27", size=3, hjust=1) +
+    scale_colour_manual(values=c("red3", "goldenrod4")) +
+    ggcyto::scale_y_flowJo_biexp(name="mCherry intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1.5e3, 5e5)) +
+    ggcyto::scale_x_flowJo_biexp(name="GFP intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1.5e3, 7e5)) +
+    theme_linedraw(12) +
+    theme(panel.grid = element_blank(), legend.position = "none") +
+    facet_grid(Mouse_Treatment~Day) 
+
+ggsave("figures/exp19_yellow_red_scatterplot_NT.png", width=12, height=20, dpi=150)
+```
+
+```{r, fig.width=12, fig.height=20}
+samples = metadata %>%
+    filter(Treatment == "GFPT") %>%
+    pull(FlowSampleNumber)
+
+percentage_samples = percentage %>%
+    filter(FlowSampleNumber %in% samples)
+
+ggplot() + 
+    geom_point(data=events[samples], aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="black") +
+    geom_point(data=events_yellow[samples], aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="goldenrod") +
+    geom_point(data=events_red[samples], aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.5, alpha=0.2, colour="red3") +
+    geom_text(data=percentage_samples, aes(x=x, y=y, label=label, colour=colour), size=3, hjust=1) +
+    geom_text(data=percentage_samples, aes(x=6e5, y=3e5, label=paste0(count, " events total")), colour="grey27", size=3, hjust=1) +
+    scale_colour_manual(values=c("red3", "goldenrod4")) +
+    ggcyto::scale_y_flowJo_biexp(name="mCherry intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1.5e3, 5e5)) +
+    ggcyto::scale_x_flowJo_biexp(name="GFP intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1.5e3, 7e5)) +
+    theme_linedraw(12) +
+    theme(panel.grid = element_blank(),
+          legend.position = "none") +
+    facet_grid(Mouse_Treatment~Day) 
+
+ggsave("figures/exp19_yellow_red_scatterplot_GFPT.png", width=12, height=20, dpi=150)
+```
+
+
+## Make plots for representative mice
+
+```{r}
+samples=c(4, 24, 44, 64, 84, 13, 33, 53, 73, 93)
+events_M4_M13 = events[samples]
+events_red_M4_M13 = events_red[samples]
+events_yellow_M4_M13 = events_yellow[samples]
+percentage_M4_M13 = percentage %>%
+    filter(Mouse == "Mouse 4" | Mouse == "Mouse 13") 
+```
+
+```{r, fig.width=12, fig.height=5}
+
+ggplot() + 
+    geom_point(data=events_M4_M13, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.75, alpha=0.2, colour="black") +
+    geom_point(data=events_yellow_M4_M13, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.75, alpha=0.2, colour="goldenrod") +
+    geom_point(data=events_red_M4_M13, aes(x=`530/30 Blue B-A`, y=`610/20 YG C-A`), shape=16, size=0.75, alpha=0.2, colour="red3") +
+    geom_text(data=percentage_M4_M13, aes(x=x, y=y, label=label, colour=colour), size=3, hjust=1) +
+    geom_text(data=percentage_M4_M13, aes(x=6e5, y=3e5, label=paste0(count, " events total")), colour="grey27", size=3, hjust=1) +
+    scale_colour_manual(values=c("red3", "goldenrod4")) +
+    ggcyto::scale_y_flowJo_biexp(name="mCherry intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1.5e3, 5e5)) +
+    ggcyto::scale_x_flowJo_biexp(name="GFP intensity", widthBasis=-500, pos=5, neg=0, breaks=c(0, 1e3,1e4,1e5), limits=c(-1.5e3, 7e5)) +
+    theme_linedraw(14) +
+    theme(panel.grid = element_blank(), 
+          axis.title.x = element_text(colour="black"), 
+          axis.title.y = element_text(colour="black"), 
+          legend.position = "none", 
+          panel.border=element_rect(size=1)) +
+    facet_grid(Treatment_Mouse~Day)
+
+ggsave("figures/exp19_yellow_red_scatterplot_M4_M13.png", width=12, height=5, dpi=300, device="png")
+```
+
+
+## Calculate and subtract background
+
+```{r}
+#find highest background yellow before E. coli introduced (Day -5)
+bg_yellow_high = percentage %>%
+    dplyr::filter(Timepoint == -5, population == "yellow+") %>%
+    pull(true) %>%
+    max()
+
+#find highest background red for all NT samples at all timespoints
+bg_red_high = percentage %>%
+    dplyr::filter(Treatment=="NT", population == "red+") %>%
+    pull(true) %>%
+    max()
+
+#set background for yellow (Day -5) and red (Day 0) based on each mouse
+percentage = percentage %>%
+    group_by(Mouse, population) %>%
+    mutate(bg = case_when(population=="yellow+" ~ true[which(Timepoint == -5)], 
+                          population=="red+" ~ true[which(Timepoint == 0)])) %>%
+    ungroup() %>%
+    mutate(positive_events_minusbg = true - bg)
+
+#set all negative values or 0 values to one
+percentage = percentage %>%
+    mutate(positive_events_minusbg_nozeros = as.double(positive_events_minusbg)) %>%
+    mutate(positive_events_minusbg_nozeros = case_when(positive_events_minusbg_nozeros <= 0 ~ 1, 
+                                               positive_events_minusbg_nozeros > 0 ~ positive_events_minusbg_nozeros))
+```
+
+```{r}
+#remove Mouse 8 T=2 based on scatterplot
+percentage = percentage %>% filter(!(Mouse == "Mouse 8" & Day == "Day 0"))
+```
+
+
+## Plot events over time for individual mice
+
+```{r, fig.width=12, fig.height=8}
+ggplot(percentage) +
+    annotate("rect", xmin=0.25, xmax=7.25, ymin=0, ymax=Inf, fill="honeydew2", colour=NA, alpha=0.75) +
+    geom_line(aes(x=Timepoint, y=positive_events_minusbg_nozeros, group=interaction(Mouse, population), colour=population), size=0.5) +
+    geom_point(aes(x=Timepoint, y=positive_events_minusbg_nozeros, group=interaction(Mouse, population), colour=population), size=2) +
+    scale_colour_manual(values=c("red3", "goldenrod3"), labels=c("mCherry+", "GFP+ mCherry+")) +
+    scale_y_log10(name="Positive events / Total events", labels = trans_format("log10", math_format(10^.x))) +
+    scale_x_continuous(name="Day", breaks=seq(-4,15,2)) +
+    theme_linedraw(12) +
+    theme(legend.position = "top", 
+          panel.grid.minor.y=element_blank(), panel.grid.major.y=element_blank(), 
+          panel.grid.minor.x=element_blank(), panel.grid.major.x = element_blank(), 
+          panel.border=element_rect(size=1.5)) +
+    annotation_logticks(sides="l") +
+    facet_wrap(~Mouse_Treatment, nrow=4)
+
+ggsave("figures/exp19_timecourse_yellow_red_byMouse_unfiltered.png", width=12, height=8)
+```
+
+<br>
+
+```{r}
+#filter out timepoints where red AND yellow are both below the highest background observed for each multipled by a factor
+percentage_filtered = percentage %>%
+    mutate(bg_high = case_when(population == "yellow+" ~ bg_yellow_high, population == "red+" ~ bg_red_high)) %>%  #background depending on fluor
+    mutate(below_background = ifelse(true > bg_high * 3, "no", "yes")) %>%                                         #mark whether above or below threshold
+    mutate(Mouse_Timepoint = paste(Mouse, Timepoint))
+
+#make new table of mouse+timepoint to filter by 
+filter_below = percentage_filtered %>%
+    dplyr::select(Mouse, Timepoint, Mouse_Timepoint, population, bg, below_background) %>%
+    dplyr::filter(below_background == "yes") %>% 
+    dplyr::filter(Timepoint != -5, Timepoint != 0) %>%
+    pivot_wider(names_from=population, values_from=bg) %>%
+    dplyr::filter(is.na(`yellow+`) == FALSE & is.na(`red+`) == FALSE)
+
+`%notin%` <- Negate(`%in%`)
+
+percentage_filtered = percentage_filtered %>%
+    dplyr::filter(Mouse_Timepoint %notin% filter_below$Mouse_Timepoint)
+```
+
+```{r, fig.height=8, fig.width=12}
+ggplot(percentage_filtered) +
+    annotate("rect", xmin=0.25, xmax=7.25, ymin=0, ymax=Inf, fill="honeydew2", colour=NA, alpha=0.75) +
+    geom_line(aes(x=Timepoint, y=positive_events_minusbg_nozeros, group=interaction(Mouse, population), colour=population), size=0.5) +
+    geom_point(aes(x=Timepoint, y=positive_events_minusbg_nozeros, group=interaction(Mouse, population), colour=population), size=2) +
+    scale_colour_manual(values=c("red3", "goldenrod3"), labels=c("mCherry+", "GFP+ mCherry+")) +
+    scale_y_log10(name="Positive events / Total events", labels = trans_format("log10", math_format(10^.x))) +
+    scale_x_continuous(name="Day", breaks=seq(-4,15,2)) +
+    theme_linedraw(12) +
+    theme(legend.position = "top", 
+          panel.grid.minor.y=element_blank(), panel.grid.major.y=element_blank(), 
+          panel.grid.minor.x=element_blank(), panel.grid.major.x = element_blank(), 
+          panel.border=element_rect(size=1.5)) +
+    annotation_logticks(sides="l") +
+    facet_wrap(~Mouse_Treatment, nrow=4)
+
+ggsave("figures/exp19_timecourse_yellow_red_byMouse.png", height=8, width=12, dpi=150)
+ggsave("figures/exp19_timecourse_yellow_red_byMouse.pdf", height=8, width=12)
+```
+
+<br>
+
+## Plot percent yellow / red at Day 14
+
+```{r}
+dayfourteen = percentage_filtered %>%
+    dplyr::filter(Timepoint == 14) 
+```
+
+```{r}
+#calculate percent positive yellow/red using background subtracted-positive events (no negatives)
+dayfourteen = dayfourteen %>%
+    mutate(positive_events_minusbg_nonegs = as.double(positive_events_minusbg)) %>%
+    mutate(positive_events_minusbg_nonegs = case_when(positive_events_minusbg_nonegs <= 0 ~ 0, 
+                                                      positive_events_minusbg_nonegs > 0 ~ positive_events_minusbg_nonegs)) %>%
+    group_by(Mouse, Timepoint) %>%
+    mutate(positive_events_minusbg_nonegs_yellow_red_total = sum(positive_events_minusbg_nonegs)) %>%
+    mutate(positive_events_minusbg_nonegs_percent_fluor = positive_events_minusbg_nonegs / positive_events_minusbg_nonegs_yellow_red_total * 100) %>%
+    ungroup()
+```
+
+
+```{r}
+#order mice by red fluor
+red_ranked = dayfourteen %>%
+    filter(population=="red+") %>%
+    arrange(rev(Treatment), positive_events_minusbg_nonegs_percent_fluor) %>%
+    pull(Mouse)
+
+dayfourteen$Mouse = factor(dayfourteen$Mouse, levels=red_ranked)
+dayfourteen$population = factor(dayfourteen$population, levels=c("yellow+", "red+"))
+
+#calculate background red of NT group to draw line
+bg_red_nt = dayfourteen %>%
+    dplyr::filter(Treatment=="NT" & population=="red+") %>%
+    pull(positive_events_minusbg_nonegs_percent_fluor) %>%
+    max()
+
+#make df of labels to plot percentage red value on bar plot
+labels = dayfourteen %>%
+    dplyr::filter(population == "red+") %>%
+    dplyr::filter(positive_events_minusbg_nonegs_percent_fluor > bg_red_nt) %>% 
+    mutate(labels = paste0(round(positive_events_minusbg_nonegs_percent_fluor, 0), "%")) 
+```
+
+
+```{r, fig.height=6, fig.width=5.5}
+ggplot() +
+     geom_bar(data=dayfourteen, aes(x=Mouse, y=positive_events_minusbg_nonegs_percent_fluor, fill=population), stat = "identity") +
+     geom_text(data=labels, aes(x=Mouse, y=positive_events_minusbg_nonegs_percent_fluor-4.5, label=labels), colour="white", size=3) +
+     scale_fill_manual(values = c("darkgoldenrod2","red3"), labels=c("mCherry+ GFP+", "mCherry+ only")) +
+     geom_hline(yintercept = bg_red_nt, linetype="dashed", size=0.3) +
+     scale_y_continuous(name="Day 14  Percent GFP+ mCherry+ and mCherry+ events\n(background subtracted)\n", 
+                        expand = c(0, 0), position="right", breaks=c(0,25,50,75,100), labels=c(0,25,50,75,100)) +
+     scale_x_discrete(name = "", position = "top") +
+     coord_flip() +
+     theme_linedraw(14) +
+     theme(legend.position = "bottom", legend.title=element_blank(), panel.grid=element_blank(),
+           plot.margin=unit(c(5, 8, 5, 15),"mm"), 
+           panel.border = element_rect(size=1.25), 
+           axis.title.x = element_text(size=12)) +
+     guides(fill = guide_legend(nrow = 1))
+
+ggsave("figures/exp19_percent_yellow_red_barplot.pdf", width=5.5, height=6)
+```
+
+
+## Log session
+
+```{r}
+sessionInfo()
+```
+
+
